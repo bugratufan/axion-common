@@ -1,0 +1,24 @@
+# Build artifacts
+build/
+work/
+
+# GHDL files
+*.cf
+*.o
+
+# Waveforms and logs
+*.ghw
+*.vcd
+*.log
+
+# Python cache (if any scripts use Python)
+__pycache__/
+*.pyc
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
