@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+  # Enforce that Pull Requests to 'main' must come from 'develop'
+  branch-policy:
+    name: Enforce Branch Policy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    steps:
+      - name: Check source branch matches develop
+        run: |
+          if [[ "${{ github.head_ref }}" != "develop" ]]; then
+            echo "Error: Violation of Git Flow."
+            echo "Merges to 'main' are only allowed from 'develop' branch."
+            echo "Current source branch: ${{ github.head_ref }}"
+            exit 1
+          fi
+
+  # Run VHDL Analysis and Simulation
+  test:
+    name: VHDL Test (GHDL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GHDL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ghdl
+
+      - name: Syntax Check (Source)
+        run: |
+          make all
+
+      - name: Run Simulation
+        run: |
+          make test
