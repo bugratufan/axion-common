@@ -1,4 +1,4 @@
 # Requirements
 
-```{include} ../../requirements.md
+```{include} reqs.md
 ```
