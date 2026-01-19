@@ -22,3 +22,7 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# Documentation artifacts
+docs/source/intro.md
+docs/source/reqs.md

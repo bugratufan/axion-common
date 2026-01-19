@@ -1,5 +1,8 @@
 # Axion Common
 
+[![CI](https://github.com/bugratufan/axion-common/actions/workflows/ci.yml/badge.svg)](https://github.com/bugratufan/axion-common/actions/workflows/ci.yml)
+[![Release](https://github.com/bugratufan/axion-common/actions/workflows/cd.yml/badge.svg)](https://github.com/bugratufan/axion-common/actions/workflows/cd.yml)
+
 Shared VHDL modules and utilities for use with the [Axion-HDL](https://github.com/bugratufan/axion-hdl) tool.
 
 ## Overview

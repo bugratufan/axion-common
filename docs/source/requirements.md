@@ -1,0 +1,4 @@
+# Requirements
+
+```{include} reqs.md
+```
