@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.version'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read Version
+        id: version
+        run: |
+          VER=$(cat .version | tr -d '[:space:]')
+          echo "VERSION=$VER" >> $GITHUB_OUTPUT
+
+      - name: Check if Tag Exists
+        uses: mukunku/tag-exists-action@v1.4.0
+        id: check_tag
+        with:
+          tag: 'v${{ steps.version.outputs.VERSION }}'
+
+      - name: Create Release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.VERSION }}
+          name: Release v${{ steps.version.outputs.VERSION }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
