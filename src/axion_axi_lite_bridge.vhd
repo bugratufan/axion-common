@@ -25,8 +25,8 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-library axion_common;
-use axion_common.axion_common_pkg.all;
+library work;
+use work.axion_common_pkg.all;
 
 entity axion_axi_lite_bridge is
     generic (

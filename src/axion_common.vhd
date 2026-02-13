@@ -10,8 +10,8 @@
 library ieee;
 use ieee.std_logic_1164.all;
 
-library axion_common;
-use axion_common.axion_common_pkg.all;
+library work;
+use work.axion_common_pkg.all;
 
 package axion_common is
     -- This package provides access to all axion_common components
