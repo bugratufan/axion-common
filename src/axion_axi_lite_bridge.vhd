@@ -62,9 +62,11 @@ architecture rtl of axion_axi_lite_bridge is
         ST_WRITE_DATA,
         ST_WRITE_RESP,
         ST_WRITE_COMPLETE,
+        ST_WRITE_DRAIN,
         ST_READ_ADDR,
         ST_READ_RESP,
-        ST_READ_COMPLETE
+        ST_READ_COMPLETE,
+        ST_READ_DRAIN
     );
 
     ---------------------------------------------------------------------------
@@ -86,6 +88,7 @@ architecture rtl of axion_axi_lite_bridge is
     signal resp_received    : std_logic_vector(G_NUM_SLAVES-1 downto 0);
     signal resp_ok_found    : std_logic;
     signal resp_ok_index    : integer range 0 to G_NUM_SLAVES-1;
+    signal wdata_captured   : std_logic;
     
     -- Output registers
     signal m_axi_out        : t_axi_lite_s2m;
@@ -116,7 +119,8 @@ begin
                 m_araddr_reg    <= (others => '0');
                 m_arprot_reg    <= (others => '0');
                 m_axi_out       <= C_AXI_LITE_S2M_INIT;
-                
+                wdata_captured  <= '0';
+
                 for i in 0 to G_NUM_SLAVES-1 loop
                     s_axi_out(i) <= C_AXI_LITE_M2S_INIT;
                 end loop;
@@ -148,6 +152,7 @@ begin
                         m_axi_out.rvalid <= '0';
                         resp_received    <= (others => '0');
                         resp_ok_found    <= '0';
+                        wdata_captured   <= '0';
                         timeout_cnt      <= (others => '0');
                         timeout_flag     <= '0';
                         
@@ -186,6 +191,7 @@ begin
                                 m_wdata_reg       <= M_AXI_M2S.wdata;
                                 m_wstrb_reg       <= M_AXI_M2S.wstrb;
                                 m_axi_out.wready  <= '1';
+                                wdata_captured    <= '1';
                             end if;
                             
                             state <= ST_WRITE_ADDR;
@@ -219,12 +225,14 @@ begin
                             end if;
                         end loop;
                         
-                        -- Check if master has write data ready
-                        if M_AXI_M2S.wvalid = '1' then
+                        -- Check if master has write data ready (only if not already captured in IDLE)
+                        if M_AXI_M2S.wvalid = '1' and wdata_captured = '0' then
                             m_wdata_reg       <= M_AXI_M2S.wdata;
                             m_wstrb_reg       <= M_AXI_M2S.wstrb;
                             m_axi_out.wready  <= '1';
                             
+                            wdata_captured <= '1';
+
                             -- Forward write data to all slaves
                             for i in 0 to G_NUM_SLAVES-1 loop
                                 s_axi_out(i).wdata  <= M_AXI_M2S.wdata;
@@ -232,7 +240,7 @@ begin
                                 s_axi_out(i).wvalid <= '1';
                                 s_axi_out(i).bready <= '1';
                             end loop;
-                            
+
                             state <= ST_WRITE_DATA;
                         end if;
                         
@@ -247,6 +255,13 @@ begin
                     -- WRITE_DATA: Wait for slave wready
                     -----------------------------------------------------------
                     when ST_WRITE_DATA =>
+                        -- Clear awvalid for slaves that assert awready late (after WRITE_ADDR)
+                        for i in 0 to G_NUM_SLAVES-1 loop
+                            if S_AXI_ARR_S2M(i).awready = '1' then
+                                s_axi_out(i).awvalid <= '0';
+                            end if;
+                        end loop;
+
                         -- Check which slaves accepted data
                         for i in 0 to G_NUM_SLAVES-1 loop
                             if S_AXI_ARR_S2M(i).wready = '1' then
@@ -332,6 +347,39 @@ begin
                         -- Keep bvalid high until master accepts with bready
                         if M_AXI_M2S.bready = '1' then
                             m_axi_out.bvalid <= '0';
+                            -- Check if any slave response is still pending
+                            v_all_resp_received := '1';
+                            for i in 0 to G_NUM_SLAVES-1 loop
+                                if resp_received(i) = '0' then
+                                    v_all_resp_received := '0';
+                                end if;
+                            end loop;
+                            if v_all_resp_received = '1' then
+                                state <= ST_IDLE;
+                            else
+                                state <= ST_WRITE_DRAIN;
+                            end if;
+                        end if;
+
+                    -----------------------------------------------------------
+                    -- WRITE_DRAIN: Consume remaining slave bresp after master done
+                    -----------------------------------------------------------
+                    when ST_WRITE_DRAIN =>
+                        v_all_resp_received := '1';
+                        for i in 0 to G_NUM_SLAVES-1 loop
+                            if S_AXI_ARR_S2M(i).bvalid = '1' and resp_received(i) = '0' then
+                                -- Handshake in progress (bready was already 1), clean up
+                                resp_received(i)    <= '1';
+                                s_axi_out(i).bready <= '0';
+                            elsif resp_received(i) = '0' then
+                                v_all_resp_received := '0';  -- still waiting for this slave
+                            end if;
+                        end loop;
+
+                        if v_all_resp_received = '1' or timeout_flag = '1' then
+                            for i in 0 to G_NUM_SLAVES-1 loop
+                                s_axi_out(i).bready <= '0';
+                            end loop;
                             state <= ST_IDLE;
                         end if;
 
@@ -428,6 +476,39 @@ begin
                         -- Keep rvalid high until master accepts with rready
                         if M_AXI_M2S.rready = '1' then
                             m_axi_out.rvalid <= '0';
+                            -- Check if any slave response is still pending
+                            v_all_resp_received := '1';
+                            for i in 0 to G_NUM_SLAVES-1 loop
+                                if resp_received(i) = '0' then
+                                    v_all_resp_received := '0';
+                                end if;
+                            end loop;
+                            if v_all_resp_received = '1' then
+                                state <= ST_IDLE;
+                            else
+                                state <= ST_READ_DRAIN;
+                            end if;
+                        end if;
+
+                    -----------------------------------------------------------
+                    -- READ_DRAIN: Consume remaining slave rresp after master done
+                    -----------------------------------------------------------
+                    when ST_READ_DRAIN =>
+                        v_all_resp_received := '1';
+                        for i in 0 to G_NUM_SLAVES-1 loop
+                            if S_AXI_ARR_S2M(i).rvalid = '1' and resp_received(i) = '0' then
+                                -- Handshake in progress (rready was already 1), clean up
+                                resp_received(i)    <= '1';
+                                s_axi_out(i).rready <= '0';
+                            elsif resp_received(i) = '0' then
+                                v_all_resp_received := '0';  -- still waiting for this slave
+                            end if;
+                        end loop;
+
+                        if v_all_resp_received = '1' or timeout_flag = '1' then
+                            for i in 0 to G_NUM_SLAVES-1 loop
+                                s_axi_out(i).rready <= '0';
+                            end loop;
                             state <= ST_IDLE;
                         end if;
 

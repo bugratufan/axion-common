@@ -189,6 +189,11 @@ REPORT_HEADER
         "AXION-COMMON-010:Address Transparency:TC_BRIDGE_ADDR_TRANSPARENCY"
         "AXION-COMMON-011:Data Integrity:TC_BRIDGE_DATA_INTEGRITY"
         "AXION-COMMON-012:Reset Recovery:TC_BRIDGE_RESET_RECOVERY"
+        "BUG-FIX-001:Write Ready Single Pulse:TC_BUG_WREADY_SINGLE_PULSE"
+        "BUG-FIX-002:Write Drain Delayed Error:TC_BUG_DRAIN_WRITE"
+        "BUG-FIX-003:Write Drain Timeout:TC_BUG_DRAIN_WRITE_TIMEOUT"
+        "BUG-FIX-004:Read Drain Delayed Error:TC_BUG_DRAIN_READ"
+        "BUG-FIX-005:Read Drain Timeout:TC_BUG_DRAIN_READ_TIMEOUT"
     )
 
     PASSED=0

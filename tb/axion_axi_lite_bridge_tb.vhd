@@ -63,7 +63,11 @@ architecture tb of axion_axi_lite_bridge_tb is
     type t_slave_mode is (SLAVE_RESPOND_OKAY, SLAVE_RESPOND_ERROR, SLAVE_NO_RESPOND);
     type t_slave_mode_array is array (natural range <>) of t_slave_mode;
     signal slave_mode       : t_slave_mode_array(0 to C_NUM_SLAVES-1) := (others => SLAVE_RESPOND_OKAY);
-    signal slave_delay      : integer := 2;  -- Response delay in cycles
+    signal slave_delay      : integer := 2;  -- Response delay in cycles (default for all)
+
+    -- Per-slave delay for drain tests
+    type t_int_array is array (natural range <>) of integer;
+    signal slave_delay_arr  : t_int_array(0 to C_NUM_SLAVES-1) := (others => 2);
     signal slave_read_data  : std_logic_vector(31 downto 0) := x"12345678";
     
     -- Response capture signals (to capture response while valid is high)
@@ -127,43 +131,56 @@ begin
     ---------------------------------------------------------------------------
     gen_slave_model : for i in 0 to C_NUM_SLAVES-1 generate
         p_slave_model : process(clk)
-            variable delay_cnt : integer := 0;
+            variable delay_cnt    : integer := 0;
             variable pending_write : boolean := false;
             variable pending_read  : boolean := false;
+            variable addr_received : boolean := false;
+            variable data_received : boolean := false;
         begin
             if rising_edge(clk) then
                 if rst_n = '0' then
                     s_axi_s2m(i) <= C_AXI_LITE_S2M_INIT;
-                    delay_cnt := 0;
+                    delay_cnt    := 0;
                     pending_write := false;
-                    pending_read := false;
+                    pending_read  := false;
+                    addr_received := false;
+                    data_received := false;
                 else
-                    -- Default ready signals (combinatorial in real slave, registered here for simplicity)
+                    -- Default ready signals
                     s_axi_s2m(i).awready <= '1';
                     s_axi_s2m(i).wready  <= '1';
                     s_axi_s2m(i).arready <= '1';
-                    
+
                     -- Clear valid after handshake
                     if s_axi_s2m(i).bvalid = '1' and s_axi_m2s(i).bready = '1' then
                         s_axi_s2m(i).bvalid <= '0';
                     end if;
-                    
+
                     if s_axi_s2m(i).rvalid = '1' and s_axi_m2s(i).rready = '1' then
                         s_axi_s2m(i).rvalid <= '0';
                     end if;
-                    
-                    -- Handle write request
-                    if s_axi_m2s(i).awvalid = '1' and s_axi_m2s(i).wvalid = '1' then
+
+                    -- AXI4-Lite write: address and data channels are independent
+                    if s_axi_m2s(i).awvalid = '1' and not pending_write then
+                        addr_received := true;
+                    end if;
+                    if s_axi_m2s(i).wvalid = '1' and not pending_write then
+                        data_received := true;
+                    end if;
+                    -- Start delayed response when both address and data received
+                    if addr_received and data_received and not pending_write then
                         pending_write := true;
-                        delay_cnt := slave_delay;
+                        addr_received := false;
+                        data_received := false;
+                        delay_cnt := slave_delay_arr(i);
                     end if;
-                    
+
                     -- Handle read request
-                    if s_axi_m2s(i).arvalid = '1' then
+                    if s_axi_m2s(i).arvalid = '1' and not pending_read then
                         pending_read := true;
-                        delay_cnt := slave_delay;
+                        delay_cnt := slave_delay_arr(i);
                     end if;
-                    
+
                     -- Generate delayed response
                     if delay_cnt > 0 then
                         delay_cnt := delay_cnt - 1;
@@ -177,7 +194,6 @@ begin
                                 s_axi_s2m(i).bresp  <= C_AXI_RESP_SLVERR;
                                 s_axi_s2m(i).bvalid <= '1';
                             when SLAVE_NO_RESPOND =>
-                                -- Do nothing, let timeout occur
                                 null;
                         end case;
                     elsif pending_read then
@@ -192,7 +208,6 @@ begin
                                 s_axi_s2m(i).rresp  <= C_AXI_RESP_SLVERR;
                                 s_axi_s2m(i).rvalid <= '1';
                             when SLAVE_NO_RESPOND =>
-                                -- Do nothing, let timeout occur
                                 null;
                         end case;
                     end if;
@@ -277,8 +292,9 @@ begin
         
     begin
         -- Initialize
-        m_axi_m2s <= C_AXI_LITE_M2S_INIT;
-        slave_mode <= (others => SLAVE_RESPOND_OKAY);
+        m_axi_m2s      <= C_AXI_LITE_M2S_INIT;
+        slave_mode     <= (others => SLAVE_RESPOND_OKAY);
+        slave_delay_arr <= (others => 2);
         
         -- Print header
         write(l, string'(""));
@@ -857,6 +873,189 @@ begin
         wait_cycles(2);
         report_test(test_name, test_pass, tests_passed, tests_failed, "AXION-COMMON-012");
         
+        -----------------------------------------------------------------------
+        -- TC_BUG_WREADY_SINGLE_PULSE (BUG-FIX-001)
+        -- Verifies Bug Fix 1: wready must be asserted for exactly ONE cycle
+        -- when awvalid and wvalid arrive simultaneously.
+        -----------------------------------------------------------------------
+        test_name <= "Write Ready Single Pulse (Bug Fix 1)                            ";
+        test_pass <= true;
+
+        slave_mode      <= (others => SLAVE_RESPOND_OKAY);
+        slave_delay_arr <= (others => 2);
+        wait_cycles(1);
+
+        m_axi_m2s.awaddr  <= C_TEST_ADDR_1;
+        m_axi_m2s.awvalid <= '1';
+        m_axi_m2s.wdata   <= C_TEST_DATA_1;
+        m_axi_m2s.wstrb   <= C_TEST_STRB;
+        m_axi_m2s.wvalid  <= '1';
+        m_axi_m2s.bready  <= '1';
+
+        -- Wait for the wready handshake
+        wait until rising_edge(clk) and m_axi_s2m.wready = '1';
+        -- Per AXI spec, deassert wvalid after handshake
+        m_axi_m2s.awvalid <= '0';
+        m_axi_m2s.wvalid  <= '0';
+
+        -- wready must NOT be asserted again on the very next cycle
+        wait until rising_edge(clk);
+        if m_axi_s2m.wready /= '0' then
+            test_pass <= false;  -- double wready assertion detected
+        end if;
+
+        -- Complete transaction
+        wait until rising_edge(clk) and m_axi_s2m.bvalid = '1';
+        wait_cycles(1);
+        m_axi_m2s.bready <= '0';
+
+        wait_cycles(2);
+        report_test(test_name, test_pass, tests_passed, tests_failed, "BUG-FIX-001");
+
+        -----------------------------------------------------------------------
+        -- TC_BUG_DRAIN_WRITE (BUG-FIX-002)
+        -- Verifies Bug Fix 3 (write): bridge drains delayed slave responses
+        -- before accepting a new transaction. Slave 0 returns OK fast; slaves
+        -- 1 and 2 return ERROR slowly. The second write must not see the
+        -- leftover bvalid from the first transaction.
+        -----------------------------------------------------------------------
+        test_name <= "Write Drain: Delayed Error Responses (Bug Fix 3)               ";
+        test_pass <= true;
+
+        slave_mode(0)      <= SLAVE_RESPOND_OKAY;
+        slave_mode(1)      <= SLAVE_RESPOND_ERROR;
+        slave_mode(2)      <= SLAVE_RESPOND_ERROR;
+        slave_delay_arr(0) <= 2;
+        slave_delay_arr(1) <= 20;
+        slave_delay_arr(2) <= 20;
+        wait_cycles(1);
+
+        -- First write: bridge should return OK (from slave 0) then drain
+        -- the slow error responses from slaves 1 and 2 in ST_WRITE_DRAIN.
+        axi_write(C_TEST_ADDR_1, C_TEST_DATA_1, C_TEST_STRB);
+
+        -- Second write: all slaves now respond OK quickly.
+        -- Bridge must be clean (drain complete) before it accepts this.
+        -- If drain is broken, stale bvalid from slaves 1/2 can contaminate
+        -- the response of this transaction.
+        slave_mode      <= (others => SLAVE_RESPOND_OKAY);
+        slave_delay_arr <= (others => 2);
+        wait_cycles(1);
+
+        axi_write(C_TEST_ADDR_2, C_TEST_DATA_2, C_TEST_STRB);
+
+        if last_bresp /= C_AXI_RESP_OKAY then
+            test_pass <= false;
+        end if;
+
+        wait_cycles(2);
+        report_test(test_name, test_pass, tests_passed, tests_failed, "BUG-FIX-002");
+
+        -----------------------------------------------------------------------
+        -- TC_BUG_DRAIN_WRITE_TIMEOUT (BUG-FIX-003)
+        -- Verifies Bug Fix 3 (write timeout): when some slaves never respond,
+        -- ST_WRITE_DRAIN exits via timeout, leaving bridge fully functional.
+        -----------------------------------------------------------------------
+        test_name <= "Write Drain: Non-Responding Slaves Timeout (Bug Fix 3)         ";
+        test_pass <= true;
+
+        slave_mode(0)      <= SLAVE_RESPOND_OKAY;
+        slave_mode(1)      <= SLAVE_NO_RESPOND;
+        slave_mode(2)      <= SLAVE_NO_RESPOND;
+        slave_delay_arr    <= (others => 2);
+        wait_cycles(1);
+
+        -- First write: slave 0 OK, others never respond → drain via timeout
+        axi_write(C_TEST_ADDR_1, C_TEST_DATA_1, C_TEST_STRB);
+
+        -- After drain timeout, bridge must be back in IDLE and work normally
+        slave_mode      <= (others => SLAVE_RESPOND_OKAY);
+        slave_delay_arr <= (others => 2);
+        wait_cycles(1);
+
+        axi_write(C_TEST_ADDR_2, C_TEST_DATA_2, C_TEST_STRB);
+
+        if last_bresp /= C_AXI_RESP_OKAY then
+            test_pass <= false;
+        end if;
+
+        wait_cycles(2);
+        report_test(test_name, test_pass, tests_passed, tests_failed, "BUG-FIX-003");
+
+        -----------------------------------------------------------------------
+        -- TC_BUG_DRAIN_READ (BUG-FIX-004)
+        -- Verifies Bug Fix 3 (read): bridge drains delayed slave rvalid
+        -- responses before accepting a new transaction.
+        -----------------------------------------------------------------------
+        test_name <= "Read Drain: Delayed Error Responses (Bug Fix 3)                ";
+        test_pass <= true;
+
+        slave_mode(0)      <= SLAVE_RESPOND_OKAY;
+        slave_mode(1)      <= SLAVE_RESPOND_ERROR;
+        slave_mode(2)      <= SLAVE_RESPOND_ERROR;
+        slave_delay_arr(0) <= 2;
+        slave_delay_arr(1) <= 20;
+        slave_delay_arr(2) <= 20;
+        slave_read_data    <= x"AABBCCDD";
+        wait_cycles(1);
+
+        -- First read: bridge returns OK from slave 0, then drains others
+        axi_read(C_TEST_ADDR_1, read_data);
+
+        -- Second read: all OK; stale rvalid from slaves 1/2 must not interfere
+        slave_mode      <= (others => SLAVE_RESPOND_OKAY);
+        slave_delay_arr <= (others => 2);
+        slave_read_data <= x"12345678";
+        wait_cycles(1);
+
+        axi_read(C_TEST_ADDR_2, read_data);
+
+        if last_rresp /= C_AXI_RESP_OKAY then
+            test_pass <= false;
+        end if;
+        if read_data /= x"12345678" then
+            test_pass <= false;
+        end if;
+
+        wait_cycles(2);
+        report_test(test_name, test_pass, tests_passed, tests_failed, "BUG-FIX-004");
+
+        -----------------------------------------------------------------------
+        -- TC_BUG_DRAIN_READ_TIMEOUT (BUG-FIX-005)
+        -- Verifies Bug Fix 3 (read timeout): non-responding slaves cause
+        -- ST_READ_DRAIN to exit via timeout; bridge remains functional.
+        -----------------------------------------------------------------------
+        test_name <= "Read Drain: Non-Responding Slaves Timeout (Bug Fix 3)          ";
+        test_pass <= true;
+
+        slave_mode(0)      <= SLAVE_RESPOND_OKAY;
+        slave_mode(1)      <= SLAVE_NO_RESPOND;
+        slave_mode(2)      <= SLAVE_NO_RESPOND;
+        slave_delay_arr    <= (others => 2);
+        slave_read_data    <= x"DEADBEEF";
+        wait_cycles(1);
+
+        -- First read: slave 0 OK, others never respond → drain via timeout
+        axi_read(C_TEST_ADDR_1, read_data);
+
+        -- After timeout, bridge must work normally
+        slave_mode      <= (others => SLAVE_RESPOND_OKAY);
+        slave_delay_arr <= (others => 2);
+        slave_read_data <= x"CAFEBABE";
+        wait_cycles(1);
+
+        axi_read(C_TEST_ADDR_2, read_data);
+
+        if last_rresp /= C_AXI_RESP_OKAY then
+            test_pass <= false;
+        end if;
+        if read_data /= x"CAFEBABE" then
+            test_pass <= false;
+        end if;
+
+        wait_cycles(2);
+        report_test(test_name, test_pass, tests_passed, tests_failed, "BUG-FIX-005");
+
         -----------------------------------------------------------------------
         -- Test Summary
         -----------------------------------------------------------------------
