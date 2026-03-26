@@ -346,13 +346,21 @@ begin
                     -- WRITE_COMPLETE: Wait for master bready handshake
                     -----------------------------------------------------------
                     when ST_WRITE_COMPLETE =>
+                        -- While waiting for master bready, record any late slave responses
+                        -- so drain state does not wait unnecessarily or timeout for them.
+                        for i in 0 to G_NUM_SLAVES-1 loop
+                            if S_AXI_ARR_S2M(i).bvalid = '1' and resp_received(i) = '0' then
+                                resp_received(i)    <= '1';
+                                s_axi_out(i).bready <= '0';
+                            end if;
+                        end loop;
+
                         -- Keep bvalid high until master accepts with bready
                         if M_AXI_M2S.bready = '1' then
                             m_axi_out.bvalid <= '0';
-                            -- Check if any slave response is still pending
                             v_all_resp_received := '1';
                             for i in 0 to G_NUM_SLAVES-1 loop
-                                if resp_received(i) = '0' then
+                                if resp_received(i) = '0' and S_AXI_ARR_S2M(i).bvalid = '0' then
                                     v_all_resp_received := '0';
                                 end if;
                             end loop;
@@ -475,13 +483,21 @@ begin
                     -- READ_COMPLETE: Wait for master rready handshake
                     -----------------------------------------------------------
                     when ST_READ_COMPLETE =>
+                        -- While waiting for master rready, record any late slave responses
+                        -- so drain state does not wait unnecessarily or timeout for them.
+                        for i in 0 to G_NUM_SLAVES-1 loop
+                            if S_AXI_ARR_S2M(i).rvalid = '1' and resp_received(i) = '0' then
+                                resp_received(i)    <= '1';
+                                s_axi_out(i).rready <= '0';
+                            end if;
+                        end loop;
+
                         -- Keep rvalid high until master accepts with rready
                         if M_AXI_M2S.rready = '1' then
                             m_axi_out.rvalid <= '0';
-                            -- Check if any slave response is still pending
                             v_all_resp_received := '1';
                             for i in 0 to G_NUM_SLAVES-1 loop
-                                if resp_received(i) = '0' then
+                                if resp_received(i) = '0' and S_AXI_ARR_S2M(i).rvalid = '0' then
                                     v_all_resp_received := '0';
                                 end if;
                             end loop;
