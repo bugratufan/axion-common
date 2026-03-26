@@ -63,9 +63,8 @@ architecture tb of axion_axi_lite_bridge_tb is
     type t_slave_mode is (SLAVE_RESPOND_OKAY, SLAVE_RESPOND_ERROR, SLAVE_NO_RESPOND);
     type t_slave_mode_array is array (natural range <>) of t_slave_mode;
     signal slave_mode       : t_slave_mode_array(0 to C_NUM_SLAVES-1) := (others => SLAVE_RESPOND_OKAY);
-    signal slave_delay      : integer := 2;  -- Response delay in cycles (default for all)
 
-    -- Per-slave delay for drain tests
+    -- Per-slave response delay in clock cycles
     type t_int_array is array (natural range <>) of integer;
     signal slave_delay_arr  : t_int_array(0 to C_NUM_SLAVES-1) := (others => 2);
     signal slave_read_data  : std_logic_vector(31 downto 0) := x"12345678";
