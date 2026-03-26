@@ -230,8 +230,7 @@ begin
                             m_wdata_reg       <= M_AXI_M2S.wdata;
                             m_wstrb_reg       <= M_AXI_M2S.wstrb;
                             m_axi_out.wready  <= '1';
-                            
-                            wdata_captured <= '1';
+                            wdata_captured    <= '1';
 
                             -- Forward write data to all slaves
                             for i in 0 to G_NUM_SLAVES-1 loop
@@ -241,6 +240,9 @@ begin
                                 s_axi_out(i).bready <= '1';
                             end loop;
 
+                            state <= ST_WRITE_DATA;
+                        elsif wdata_captured = '1' then
+                            -- wdata already captured and forwarded in IDLE, proceed directly
                             state <= ST_WRITE_DATA;
                         end if;
                         
