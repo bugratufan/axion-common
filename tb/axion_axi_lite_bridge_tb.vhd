@@ -919,7 +919,7 @@ begin
         -- 1 and 2 return ERROR slowly. The second write must not see the
         -- leftover bvalid from the first transaction.
         -----------------------------------------------------------------------
-        test_name <= "Write Drain: Delayed Error Responses (Bug Fix 3)               ";
+        test_name <= "Write Drain: Delayed Error Responses (Bug Fix 3)                ";
         test_pass <= true;
 
         slave_mode(0)      <= SLAVE_RESPOND_OKAY;
@@ -956,7 +956,7 @@ begin
         -- Verifies Bug Fix 3 (write timeout): when some slaves never respond,
         -- ST_WRITE_DRAIN exits via timeout, leaving bridge fully functional.
         -----------------------------------------------------------------------
-        test_name <= "Write Drain: Non-Responding Slaves Timeout (Bug Fix 3)         ";
+        test_name <= "Write Drain: Non-Responding Slaves Timeout (Bug Fix 3)          ";
         test_pass <= true;
 
         slave_mode(0)      <= SLAVE_RESPOND_OKAY;
@@ -987,7 +987,7 @@ begin
         -- Verifies Bug Fix 3 (read): bridge drains delayed slave rvalid
         -- responses before accepting a new transaction.
         -----------------------------------------------------------------------
-        test_name <= "Read Drain: Delayed Error Responses (Bug Fix 3)                ";
+        test_name <= "Read Drain: Delayed Error Responses (Bug Fix 3)                 ";
         test_pass <= true;
 
         slave_mode(0)      <= SLAVE_RESPOND_OKAY;
@@ -1025,7 +1025,7 @@ begin
         -- Verifies Bug Fix 3 (read timeout): non-responding slaves cause
         -- ST_READ_DRAIN to exit via timeout; bridge remains functional.
         -----------------------------------------------------------------------
-        test_name <= "Read Drain: Non-Responding Slaves Timeout (Bug Fix 3)          ";
+        test_name <= "Read Drain: Non-Responding Slaves Timeout (Bug Fix 3)           ";
         test_pass <= true;
 
         slave_mode(0)      <= SLAVE_RESPOND_OKAY;
