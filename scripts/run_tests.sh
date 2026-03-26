@@ -194,6 +194,7 @@ REPORT_HEADER
         "BUG-FIX-003:Write Drain Timeout:TC_BUG_DRAIN_WRITE_TIMEOUT"
         "BUG-FIX-004:Read Drain Delayed Error:TC_BUG_DRAIN_READ"
         "BUG-FIX-005:Read Drain Timeout:TC_BUG_DRAIN_READ_TIMEOUT"
+        "BUG-FIX-006:Late AWREADY Clears AWVALID:TC_BUG_LATE_AWREADY"
     )
 
     PASSED=0

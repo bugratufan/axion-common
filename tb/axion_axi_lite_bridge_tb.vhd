@@ -64,9 +64,10 @@ architecture tb of axion_axi_lite_bridge_tb is
     type t_slave_mode_array is array (natural range <>) of t_slave_mode;
     signal slave_mode       : t_slave_mode_array(0 to C_NUM_SLAVES-1) := (others => SLAVE_RESPOND_OKAY);
 
-    -- Per-slave response delay in clock cycles
+    -- Per-slave delay configuration
     type t_int_array is array (natural range <>) of integer;
-    signal slave_delay_arr  : t_int_array(0 to C_NUM_SLAVES-1) := (others => 2);
+    signal slave_delay_arr        : t_int_array(0 to C_NUM_SLAVES-1) := (others => 2);
+    signal slave_awready_delay_arr: t_int_array(0 to C_NUM_SLAVES-1) := (others => 0);
     signal slave_read_data  : std_logic_vector(31 downto 0) := x"12345678";
     
     -- Response capture signals (to capture response while valid is high)
@@ -131,53 +132,78 @@ begin
     gen_slave_model : for i in 0 to C_NUM_SLAVES-1 generate
         p_slave_model : process(clk)
             variable delay_cnt    : integer := 0;
-            variable pending_write : boolean := false;
-            variable pending_read  : boolean := false;
-            variable addr_received : boolean := false;
-            variable data_received : boolean := false;
+            variable aw_delay_cnt : integer := 0;
+            variable aw_waiting   : boolean := false;
+            variable pending_write: boolean := false;
+            variable pending_read : boolean := false;
+            variable addr_received: boolean := false;
+            variable data_received: boolean := false;
         begin
             if rising_edge(clk) then
                 if rst_n = '0' then
-                    s_axi_s2m(i) <= C_AXI_LITE_S2M_INIT;
-                    delay_cnt    := 0;
-                    pending_write := false;
-                    pending_read  := false;
-                    addr_received := false;
-                    data_received := false;
+                    s_axi_s2m(i)   <= C_AXI_LITE_S2M_INIT;
+                    delay_cnt      := 0;
+                    aw_delay_cnt   := 0;
+                    aw_waiting     := false;
+                    pending_write  := false;
+                    pending_read   := false;
+                    addr_received  := false;
+                    data_received  := false;
                 else
-                    -- Default ready signals
-                    s_axi_s2m(i).awready <= '1';
+                    -- WREADY and ARREADY: always immediate
                     s_axi_s2m(i).wready  <= '1';
                     s_axi_s2m(i).arready <= '1';
+
+                    -- AWREADY: configurable delay via slave_awready_delay_arr
+                    if aw_waiting then
+                        if aw_delay_cnt > 0 then
+                            aw_delay_cnt := aw_delay_cnt - 1;
+                            s_axi_s2m(i).awready <= '0';
+                        else
+                            -- Delay expired: assert awready to complete handshake
+                            s_axi_s2m(i).awready <= '1';
+                            aw_waiting    := false;
+                            addr_received := true;
+                        end if;
+                    elsif s_axi_m2s(i).awvalid = '1' and not addr_received and not pending_write
+                          and slave_awready_delay_arr(i) > 0 then
+                        -- First cycle of awvalid with delay configured: hold awready low
+                        aw_waiting   := true;
+                        aw_delay_cnt := slave_awready_delay_arr(i) - 1;
+                        s_axi_s2m(i).awready <= '0';
+                    else
+                        s_axi_s2m(i).awready <= '1';
+                        -- Immediate handshake (no delay)
+                        if s_axi_m2s(i).awvalid = '1' and not addr_received and not pending_write then
+                            addr_received := true;
+                        end if;
+                    end if;
+
+                    -- W channel: data captured on wvalid (wready always 1)
+                    if s_axi_m2s(i).wvalid = '1' and not data_received and not pending_write then
+                        data_received := true;
+                    end if;
 
                     -- Clear valid after handshake
                     if s_axi_s2m(i).bvalid = '1' and s_axi_m2s(i).bready = '1' then
                         s_axi_s2m(i).bvalid <= '0';
                     end if;
-
                     if s_axi_s2m(i).rvalid = '1' and s_axi_m2s(i).rready = '1' then
                         s_axi_s2m(i).rvalid <= '0';
                     end if;
 
-                    -- AXI4-Lite write: address and data channels are independent
-                    if s_axi_m2s(i).awvalid = '1' and not pending_write then
-                        addr_received := true;
-                    end if;
-                    if s_axi_m2s(i).wvalid = '1' and not pending_write then
-                        data_received := true;
-                    end if;
-                    -- Start delayed response when both address and data received
+                    -- Start response when both AW and W handshakes done
                     if addr_received and data_received and not pending_write then
-                        pending_write := true;
-                        addr_received := false;
-                        data_received := false;
-                        delay_cnt := slave_delay_arr(i);
+                        pending_write  := true;
+                        addr_received  := false;
+                        data_received  := false;
+                        delay_cnt      := slave_delay_arr(i);
                     end if;
 
-                    -- Handle read request
+                    -- AR handshake (arready always 1)
                     if s_axi_m2s(i).arvalid = '1' and not pending_read then
                         pending_read := true;
-                        delay_cnt := slave_delay_arr(i);
+                        delay_cnt    := slave_delay_arr(i);
                     end if;
 
                     -- Generate delayed response
@@ -291,9 +317,10 @@ begin
         
     begin
         -- Initialize
-        m_axi_m2s      <= C_AXI_LITE_M2S_INIT;
-        slave_mode     <= (others => SLAVE_RESPOND_OKAY);
-        slave_delay_arr <= (others => 2);
+        m_axi_m2s             <= C_AXI_LITE_M2S_INIT;
+        slave_mode            <= (others => SLAVE_RESPOND_OKAY);
+        slave_delay_arr       <= (others => 2);
+        slave_awready_delay_arr <= (others => 0);
         
         -- Print header
         write(l, string'(""));
@@ -1054,6 +1081,44 @@ begin
 
         wait_cycles(2);
         report_test(test_name, test_pass, tests_passed, tests_failed, "BUG-FIX-005");
+
+        -----------------------------------------------------------------------
+        -- TC_BUG_LATE_AWREADY (BUG-FIX-006)
+        -- Verifies that AWVALID to slaves is deasserted when AWREADY arrives
+        -- late (after the bridge has moved from ST_WRITE_ADDR to ST_WRITE_DATA).
+        -- The fix clears AWVALID per-slave in ST_WRITE_DATA on AWREADY.
+        -----------------------------------------------------------------------
+        test_name <= "Late AWREADY clears AWVALID in WRITE_DATA state (Bug Fix 2)    ";
+        test_pass <= true;
+
+        slave_mode              <= (others => SLAVE_RESPOND_OKAY);
+        slave_delay_arr         <= (others => 2);
+        -- Slave 1 delays AWREADY by 5 cycles; bridge will have moved to
+        -- ST_WRITE_DATA (wdata arrives immediately) before slave 1 asserts AWREADY.
+        slave_awready_delay_arr    <= (others => 0);
+        slave_awready_delay_arr(1) <= 5;
+        wait_cycles(1);
+
+        -- Write: awvalid+wvalid together so bridge moves to WRITE_DATA quickly.
+        -- Slave 1 will assert AWREADY late; bridge must clear AWVALID for slave 1
+        -- in ST_WRITE_DATA, otherwise slave 1 sees a phantom second AW transaction.
+        axi_write(C_TEST_ADDR_1, C_TEST_DATA_1, C_TEST_STRB);
+
+        if last_bresp /= C_AXI_RESP_OKAY then
+            test_pass <= false;
+        end if;
+
+        -- Second write must complete cleanly (slave 1 should not be confused)
+        slave_awready_delay_arr <= (others => 0);
+        wait_cycles(1);
+        axi_write(C_TEST_ADDR_2, C_TEST_DATA_2, C_TEST_STRB);
+
+        if last_bresp /= C_AXI_RESP_OKAY then
+            test_pass <= false;
+        end if;
+
+        wait_cycles(2);
+        report_test(test_name, test_pass, tests_passed, tests_failed, "BUG-FIX-006");
 
         -----------------------------------------------------------------------
         -- Test Summary
