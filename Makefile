@@ -53,10 +53,28 @@ BLUE := \033[0;34m
 NC := \033[0m
 
 ################################################################################
+# cocotb settings
+################################################################################
+
+# Python binary - prefer venv if it exists next to repo root
+VENV_PYTHON := $(shell cd $(ROOT_DIR) && git rev-parse --show-toplevel 2>/dev/null)/venv/bin/python3
+PYTHON := $(shell if [ -x "$(VENV_PYTHON)" ]; then echo "$(VENV_PYTHON)"; else echo "python3"; fi)
+
+# Find cocotb VPI library at runtime from whichever python3 is active
+COCOTB_VPI = $(shell $(PYTHON) -c \
+	"import os, cocotb; print(os.path.join(os.path.dirname(cocotb.__file__), 'libs', 'libcocotbvpi_ghdl.so'))" \
+	2>/dev/null)
+
+# cocotb build dirs
+COCOTB_BUILD_DIR := $(BUILD_DIR)/cocotb_sim
+WRAP_SRC := $(TB_DIR)/axion_axi_lite_bridge_wrap.vhd
+COCOTB_TB := tb_axion_axi_lite_bridge_cocotb
+
+################################################################################
 # Targets
 ################################################################################
 
-.PHONY: all analyze test clean help dirs check-ghdl report
+.PHONY: all analyze test cocotb-test cocotb-analyze clean help dirs check-ghdl report
 
 # Default target
 all: analyze
@@ -157,6 +175,38 @@ report:
 	@echo "$(BLUE)  Report: $(REPORT_FILE)$(NC)"
 	@echo "$(BLUE)================================================================================$(NC)"
 
+# Analyze wrapper for cocotb (depends on axion_common lib being built first)
+cocotb-analyze: analyze
+	@echo "$(YELLOW)>>> Analyzing cocotb wrapper...$(NC)"
+	@mkdir -p $(COCOTB_BUILD_DIR)
+	@$(GHDL) -a $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) $(WRAP_SRC)
+	@echo "  ✓ axion_axi_lite_bridge_wrap.vhd"
+	@$(GHDL) -e $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) axion_axi_lite_bridge_wrap
+	@echo "$(GREEN)✓ Wrapper elaborated successfully$(NC)"
+
+# Run cocotb tests
+cocotb-test: cocotb-analyze
+	@echo ""
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo "$(BLUE)  Axion Common - Running cocotb Tests$(NC)"
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo ""
+	@if [ ! -f "$(COCOTB_VPI)" ]; then \
+		echo "$(RED)Error: cocotb VPI library not found at $(COCOTB_VPI)$(NC)"; \
+		echo "  Make sure the venv is activated and cocotb is installed."; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)>>> Running cocotb simulation...$(NC)"
+	@cd $(TB_DIR) && MODULE=$(COCOTB_TB) \
+		PYTHONPATH=$(TB_DIR) \
+		$(GHDL) -r $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) \
+		axion_axi_lite_bridge_wrap \
+		--vpi=$(COCOTB_VPI) \
+		--stop-time=1ms 2>&1 | tee $(BUILD_DIR)/cocotb_output.log
+	@echo ""
+	@echo "$(GREEN)✓ cocotb tests completed$(NC)"
+	@echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"
+
 # Run tests using script (alternative)
 test-script:
 	@$(SCRIPT_DIR)/run_tests.sh
@@ -194,6 +244,7 @@ clean:
 	@rm -rf $(BUILD_DIR)
 	@rm -f *.cf
 	@rm -f axion_axi_lite_bridge_tb
+	@rm -f axion_axi_lite_bridge_wrap
 	@rm -f e~*.o
 	@echo "$(GREEN)✓ Clean complete$(NC)"
 
@@ -206,13 +257,14 @@ help:
 	@echo "  $(YELLOW)make all$(NC)        - Analyze all VHDL sources (default)"
 	@echo "  $(YELLOW)make analyze$(NC)    - Analyze VHDL sources"
 	@echo "  $(YELLOW)make elaborate$(NC)  - Elaborate testbench"
-	@echo "  $(YELLOW)make test$(NC)       - Run all tests and generate report"
-	@echo "  $(YELLOW)make wave$(NC)       - Open waveform in GTKWave"
-	@echo "  $(YELLOW)make test-wave$(NC)  - Run tests and generate waveform (.ghw)"
-	@echo "  $(YELLOW)make view-wave$(NC)  - Run tests and open waveform in GTKWave"
-	@echo "  $(YELLOW)make report$(NC)     - Generate requirement verification report"
-	@echo "  $(YELLOW)make clean$(NC)      - Remove build artifacts"
-	@echo "  $(YELLOW)make help$(NC)       - Show this help message"
+	@echo "  $(YELLOW)make test$(NC)           - Run all VHDL tests and generate report"
+	@echo "  $(YELLOW)make cocotb-test$(NC)    - Run cocotb (Python) tests"
+	@echo "  $(YELLOW)make wave$(NC)           - Open waveform in GTKWave"
+	@echo "  $(YELLOW)make test-wave$(NC)      - Run tests and generate waveform (.ghw)"
+	@echo "  $(YELLOW)make view-wave$(NC)      - Run tests and open waveform in GTKWave"
+	@echo "  $(YELLOW)make report$(NC)         - Generate requirement verification report"
+	@echo "  $(YELLOW)make clean$(NC)          - Remove build artifacts"
+	@echo "  $(YELLOW)make help$(NC)           - Show this help message"
 	@echo ""
 	@echo "Output locations:"
 	@echo "  Build directory:  $(BUILD_DIR)"
