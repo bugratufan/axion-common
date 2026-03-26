@@ -75,9 +75,26 @@ architecture tb of axion_axi_lite_bridge_tb is
     signal last_rresp       : std_logic_vector(1 downto 0) := "00";
 
     ---------------------------------------------------------------------------
+    -- Helper Functions
+    ---------------------------------------------------------------------------
+
+    -- Pad or truncate a string to exactly 64 characters.
+    -- Eliminates the need to manually count trailing spaces in test_name assignments.
+    function pad64(s : string) return string is
+        variable result : string(1 to 64) := (others => ' ');
+    begin
+        if s'length >= 64 then
+            result := s(s'low to s'low + 63);
+        else
+            result(1 to s'length) := s;
+        end if;
+        return result;
+    end function;
+
+    ---------------------------------------------------------------------------
     -- Procedures
     ---------------------------------------------------------------------------
-    
+
     -- Report test result
     procedure report_test(
         signal test_n     : inout string(1 to 64);
@@ -345,7 +362,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_AXI_RESET_BEHAVIOR (AXI-LITE-008)
         -----------------------------------------------------------------------
-        test_name <= "Reset Behavior                                                  ";
+        test_name <= pad64("Reset Behavior");
         test_pass <= true;
         
         -- Verify all valid signals are low after reset
@@ -359,7 +376,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_AXI_WRITE_ADDR_HANDSHAKE (AXI-LITE-001)
         -----------------------------------------------------------------------
-        test_name <= "Write Address Channel Handshake                                 ";
+        test_name <= pad64("Write Address Channel Handshake");
         test_pass <= true;
         
         m_axi_m2s.awaddr  <= C_TEST_ADDR_1;
@@ -391,7 +408,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_AXI_WRITE_DATA_HANDSHAKE (AXI-LITE-002)
         -----------------------------------------------------------------------
-        test_name <= "Write Data Channel Handshake                                    ";
+        test_name <= pad64("Write Data Channel Handshake");
         test_pass <= true;
         
         axi_write(C_TEST_ADDR_1, C_TEST_DATA_1, C_TEST_STRB);
@@ -403,7 +420,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_AXI_WRITE_RESP_HANDSHAKE (AXI-LITE-003)
         -----------------------------------------------------------------------
-        test_name <= "Write Response Channel Handshake                                ";
+        test_name <= pad64("Write Response Channel Handshake");
         test_pass <= true;
         
         m_axi_m2s.awaddr  <= C_TEST_ADDR_1;
@@ -438,7 +455,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_AXI_READ_ADDR_HANDSHAKE (AXI-LITE-004)
         -----------------------------------------------------------------------
-        test_name <= "Read Address Channel Handshake                                  ";
+        test_name <= pad64("Read Address Channel Handshake");
         test_pass <= true;
         
         m_axi_m2s.araddr  <= C_TEST_ADDR_1;
@@ -463,7 +480,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_AXI_READ_DATA_HANDSHAKE (AXI-LITE-005)
         -----------------------------------------------------------------------
-        test_name <= "Read Data Channel Handshake                                     ";
+        test_name <= pad64("Read Data Channel Handshake");
         test_pass <= true;
         
         slave_read_data <= C_TEST_DATA_2;
@@ -493,7 +510,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_AXI_OKAY_RESPONSE (AXI-LITE-006)
         -----------------------------------------------------------------------
-        test_name <= "OKAY Response Code                                              ";
+        test_name <= pad64("OKAY Response Code");
         test_pass <= true;
         
         slave_mode <= (others => SLAVE_RESPOND_OKAY);
@@ -542,7 +559,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_AXI_SLVERR_RESPONSE (AXI-LITE-007)
         -----------------------------------------------------------------------
-        test_name <= "SLVERR Response Code                                            ";
+        test_name <= pad64("SLVERR Response Code");
         test_pass <= true;
         
         slave_mode <= (others => SLAVE_RESPOND_ERROR);
@@ -592,7 +609,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_REQUEST_BROADCAST (AXION-COMMON-001)
         -----------------------------------------------------------------------
-        test_name <= "Request Broadcast to All Slaves                                 ";
+        test_name <= pad64("Request Broadcast to All Slaves");
         test_pass <= true;
         
         slave_mode <= (others => SLAVE_RESPOND_OKAY);
@@ -622,7 +639,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_FIRST_OKAY (AXION-COMMON-002)
         -----------------------------------------------------------------------
-        test_name <= "First OKAY Response Selection                                   ";
+        test_name <= pad64("First OKAY Response Selection");
         test_pass <= true;
         
         -- Only first slave responds with OKAY
@@ -645,7 +662,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_ALL_ERROR (AXION-COMMON-003)
         -----------------------------------------------------------------------
-        test_name <= "All Error Response Handling                                     ";
+        test_name <= pad64("All Error Response Handling");
         test_pass <= true;
         
         slave_mode <= (others => SLAVE_RESPOND_ERROR);
@@ -673,7 +690,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_TIMEOUT (AXION-COMMON-004)
         -----------------------------------------------------------------------
-        test_name <= "Timeout Mechanism                                               ";
+        test_name <= pad64("Timeout Mechanism");
         test_pass <= true;
         
         slave_mode <= (others => SLAVE_NO_RESPOND);
@@ -708,7 +725,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_SLAVE_COUNT (AXION-COMMON-005)
         -----------------------------------------------------------------------
-        test_name <= "Generic Slave Count                                             ";
+        test_name <= pad64("Generic Slave Count");
         test_pass <= true;
         
         -- Just verify DUT instantiated with C_NUM_SLAVES works
@@ -721,7 +738,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_WRITE_SEQUENCE (AXION-COMMON-006)
         -----------------------------------------------------------------------
-        test_name <= "Write Transaction Sequence                                      ";
+        test_name <= pad64("Write Transaction Sequence");
         test_pass <= true;
         
         axi_write(C_TEST_ADDR_1, C_TEST_DATA_1, C_TEST_STRB);
@@ -736,7 +753,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_READ_SEQUENCE (AXION-COMMON-007)
         -----------------------------------------------------------------------
-        test_name <= "Read Transaction Sequence                                       ";
+        test_name <= pad64("Read Transaction Sequence");
         test_pass <= true;
         
         slave_read_data <= x"12345678";
@@ -752,7 +769,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_BACK_TO_BACK (AXION-COMMON-008)
         -----------------------------------------------------------------------
-        test_name <= "Back-to-Back Transactions                                       ";
+        test_name <= pad64("Back-to-Back Transactions");
         test_pass <= true;
         
         -- Multiple consecutive writes
@@ -777,7 +794,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_PARTIAL_RESPONSE (AXION-COMMON-009)
         -----------------------------------------------------------------------
-        test_name <= "Partial Slave Response                                          ";
+        test_name <= pad64("Partial Slave Response");
         test_pass <= true;
         
         -- Slave 0 responds OKAY, others don't respond
@@ -799,7 +816,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_ADDR_TRANSPARENCY (AXION-COMMON-010)
         -----------------------------------------------------------------------
-        test_name <= "Address Transparency                                            ";
+        test_name <= pad64("Address Transparency");
         test_pass <= true;
         
         m_axi_m2s.araddr  <= x"DEADBEEF";
@@ -827,7 +844,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_DATA_INTEGRITY (AXION-COMMON-011)
         -----------------------------------------------------------------------
-        test_name <= "Data Integrity                                                  ";
+        test_name <= pad64("Data Integrity");
         test_pass <= true;
         
         slave_read_data <= x"CAFEBABE";
@@ -867,7 +884,7 @@ begin
         -----------------------------------------------------------------------
         -- TC_BRIDGE_RESET_RECOVERY (AXION-COMMON-012)
         -----------------------------------------------------------------------
-        test_name <= "Reset Recovery                                                  ";
+        test_name <= pad64("Reset Recovery");
         test_pass <= true;
         
         -- Start a transaction
@@ -904,7 +921,7 @@ begin
         -- Verifies Bug Fix 1: wready must be asserted for exactly ONE cycle
         -- when awvalid and wvalid arrive simultaneously.
         -----------------------------------------------------------------------
-        test_name <= "Write Ready Single Pulse (Bug Fix 1)                            ";
+        test_name <= pad64("Write Ready Single Pulse (Bug Fix 1)");
         test_pass <= true;
 
         slave_mode      <= (others => SLAVE_RESPOND_OKAY);
@@ -945,7 +962,7 @@ begin
         -- 1 and 2 return ERROR slowly. The second write must not see the
         -- leftover bvalid from the first transaction.
         -----------------------------------------------------------------------
-        test_name <= "Write Drain: Delayed Error Responses (Bug Fix 3)                ";
+        test_name <= pad64("Write Drain: Delayed Error Responses (Bug Fix 3)");
         test_pass <= true;
 
         slave_mode(0)      <= SLAVE_RESPOND_OKAY;
@@ -982,7 +999,7 @@ begin
         -- Verifies Bug Fix 3 (write timeout): when some slaves never respond,
         -- ST_WRITE_DRAIN exits via timeout, leaving bridge fully functional.
         -----------------------------------------------------------------------
-        test_name <= "Write Drain: Non-Responding Slaves Timeout (Bug Fix 3)          ";
+        test_name <= pad64("Write Drain: Non-Responding Slaves Timeout (Bug Fix 3)");
         test_pass <= true;
 
         slave_mode(0)      <= SLAVE_RESPOND_OKAY;
@@ -1013,7 +1030,7 @@ begin
         -- Verifies Bug Fix 3 (read): bridge drains delayed slave rvalid
         -- responses before accepting a new transaction.
         -----------------------------------------------------------------------
-        test_name <= "Read Drain: Delayed Error Responses (Bug Fix 3)                 ";
+        test_name <= pad64("Read Drain: Delayed Error Responses (Bug Fix 3)");
         test_pass <= true;
 
         slave_mode(0)      <= SLAVE_RESPOND_OKAY;
@@ -1051,7 +1068,7 @@ begin
         -- Verifies Bug Fix 3 (read timeout): non-responding slaves cause
         -- ST_READ_DRAIN to exit via timeout; bridge remains functional.
         -----------------------------------------------------------------------
-        test_name <= "Read Drain: Non-Responding Slaves Timeout (Bug Fix 3)           ";
+        test_name <= pad64("Read Drain: Non-Responding Slaves Timeout (Bug Fix 3)");
         test_pass <= true;
 
         slave_mode(0)      <= SLAVE_RESPOND_OKAY;
@@ -1088,7 +1105,7 @@ begin
         -- late (after the bridge has moved from ST_WRITE_ADDR to ST_WRITE_DATA).
         -- The fix clears AWVALID per-slave in ST_WRITE_DATA on AWREADY.
         -----------------------------------------------------------------------
-        test_name <= "Late AWREADY clears AWVALID in WRITE_DATA state (Bug Fix 2)    ";
+        test_name <= pad64("Late AWREADY clears AWVALID in WRITE_DATA state (Bug Fix 2)");
         test_pass <= true;
 
         slave_mode              <= (others => SLAVE_RESPOND_OKAY);
