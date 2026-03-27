@@ -26,6 +26,8 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     git \
     make \
+    # Python dev headers (required for cocotb)
+    python3-dev \
     # GHDL dependencies
     ghdl \
     ghdl-llvm \
@@ -43,10 +45,13 @@ RUN apt-get update && apt-get install -y \
 # Verify GHDL version
 RUN ghdl --version
 
+# Upgrade pip, setuptools, wheel first (fixes many build issues)
+RUN pip3 install --upgrade pip setuptools wheel
+
 # Install Python packages globally (for simulations in the container)
 RUN pip3 install --no-cache-dir \
-    cocotb==1.8.1 \
-    cocotb-bus==0.3.1
+    cocotb \
+    cocotb-bus
 
 # Set working directory
 WORKDIR /workspace
