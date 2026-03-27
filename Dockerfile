@@ -2,11 +2,9 @@
 # Axion Common - GHDL + cocotb Docker Image
 #
 # Provides a reproducible build environment with:
-#   - GHDL 4.1.0 LLVM (for VHDL simulation)
+#   - GHDL 4.1.0+ (for VHDL simulation)
 #   - Python 3 + cocotb (for Python-based testbenches)
 #   - Make, bash, and standard tools
-#
-# Based on official ghdl/ghdl:llvm Docker image for complete GHDL support
 #
 # Usage:
 #   docker build -t ghcr.io/bugratufan/axion-common:latest .
@@ -14,15 +12,15 @@
 #
 ################################################################################
 
-FROM ghdl/ghdl:llvm
+FROM ubuntu:24.04
 
 LABEL maintainer="Bugra Tufan <bugra@example.com>"
-LABEL description="GHDL 4.1.0 LLVM + cocotb environment for Axion Common"
+LABEL description="GHDL 4.1.0+ + cocotb environment for Axion Common"
 
 # Set non-interactive mode
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install additional tools and Python
+# Install dependencies and GHDL from upstream PPA (has GHDL 4.1.0+)
 RUN apt-get update && apt-get install -y \
     # Build tools
     build-essential \
@@ -30,10 +28,12 @@ RUN apt-get update && apt-get install -y \
     make \
     # Python dev headers (required for cocotb)
     python3-dev \
-    # Python and cocotb (if not already in base image)
+    # Python and cocotb
     python3 \
     python3-pip \
     python3-venv \
+    # GHDL from default repo (Ubuntu 24.04 has newer version)
+    ghdl \
     # Utilities
     curl \
     wget \
@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Verify GHDL version
-RUN ghdl --version
+RUN ghdl --version && echo "✓ GHDL installed successfully"
 
 # Upgrade pip, setuptools, wheel first (fixes many build issues)
 RUN pip3 install --upgrade pip setuptools wheel
