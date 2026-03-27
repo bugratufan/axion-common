@@ -28,9 +28,6 @@ RUN apt-get update && apt-get install -y \
     make \
     # Python dev headers (required for cocotb)
     python3-dev \
-    # GHDL dependencies
-    ghdl \
-    ghdl-llvm \
     # Python and cocotb
     python3 \
     python3-pip \
@@ -38,9 +35,18 @@ RUN apt-get update && apt-get install -y \
     # Utilities
     curl \
     wget \
+    xz-utils \
     # For waveform viewing (optional)
     gtkwave \
     && rm -rf /var/lib/apt/lists/*
+
+# Install GHDL 4.1.0 from GitHub release (NOT from apt which only has 1.0.0)
+RUN cd /tmp && \
+    wget -q https://github.com/ghdl/ghdl/releases/download/v4.1.0/ghdl-gha-ubuntu-22.04-llvm.tgz && \
+    tar xzf ghdl-gha-ubuntu-22.04-llvm.tgz && \
+    cp bin/ghdl /usr/local/bin/ && \
+    chmod +x /usr/local/bin/ghdl && \
+    rm -rf /tmp/ghdl-gha-* /tmp/bin
 
 # Verify GHDL version
 RUN ghdl --version
