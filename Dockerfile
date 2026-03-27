@@ -44,11 +44,9 @@ RUN apt-get update && apt-get install -y \
 # Verify GHDL version
 RUN ghdl --version && echo "✓ GHDL installed successfully"
 
-# Upgrade pip, setuptools, wheel first (fixes many build issues)
-RUN pip3 install --upgrade pip setuptools wheel
-
 # Install Python packages globally (for simulations in the container)
-RUN pip3 install --no-cache-dir \
+# Note: pip, setuptools, wheel already up-to-date in Ubuntu 24.04
+RUN pip3 install --no-cache-dir --break-system-packages \
     cocotb \
     cocotb-bus
 
