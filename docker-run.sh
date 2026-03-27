@@ -169,4 +169,11 @@ docker run --rm \
     "$IMAGE_NAME" \
     bash -c "$CMD"
 
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo -e "${RED}✗ Command FAILED with exit code: $EXIT_CODE${NC}"
+    exit $EXIT_CODE
+fi
+
 print_success "Command completed successfully"

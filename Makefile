@@ -179,9 +179,11 @@ report:
 cocotb-analyze: analyze
 	@echo "$(YELLOW)>>> Analyzing cocotb wrapper...$(NC)"
 	@mkdir -p $(COCOTB_BUILD_DIR)
-	@$(GHDL) -a $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) $(WRAP_SRC)
+	$(GHDL) -a $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) $(WRAP_SRC) || \
+		(echo "$(RED)✗ Failed to analyze wrapper$(NC)" && exit 1)
 	@echo "  ✓ axion_axi_lite_bridge_wrap.vhd"
-	@$(GHDL) -e $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) axion_axi_lite_bridge_wrap
+	$(GHDL) -e $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) axion_axi_lite_bridge_wrap || \
+		(echo "$(RED)✗ Failed to elaborate wrapper$(NC)" && exit 1)
 	@echo "$(GREEN)✓ Wrapper elaborated successfully$(NC)"
 
 # Run cocotb tests
@@ -202,9 +204,16 @@ cocotb-test: cocotb-analyze
 		$(GHDL) -r $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) \
 		axion_axi_lite_bridge_wrap \
 		--vpi=$(COCOTB_VPI) \
-		--stop-time=1ms 2>&1 | tee $(BUILD_DIR)/cocotb_output.log
+		--stop-time=1ms 2>&1 | tee $(BUILD_DIR)/cocotb_output.log; \
+	EXIT_CODE=$$?; \
+	if [ $$EXIT_CODE -ne 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ cocotb tests FAILED (exit code: $$EXIT_CODE)$(NC)"; \
+		echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"; \
+		exit $$EXIT_CODE; \
+	fi
 	@echo ""
-	@echo "$(GREEN)✓ cocotb tests completed$(NC)"
+	@echo "$(GREEN)✓ cocotb tests completed successfully$(NC)"
 	@echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"
 
 # Run tests using script (alternative)
