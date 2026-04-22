@@ -16,6 +16,7 @@ MIT License
 
 import os
 import sys
+import shutil
 import pathlib
 
 # ---------------------------------------------------------------------------
@@ -47,6 +48,12 @@ def main():
         print("  source /home/bugra/Desktop/git/axion-hdl/venv/bin/activate")
         sys.exit(1)
 
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Clean stale build artifacts (Vtop.mk may contain hardcoded paths
+    # from a different Python/cocotb installation)
+    if BUILD_DIR.exists():
+        shutil.rmtree(BUILD_DIR)
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
     runner = get_runner("verilator")
