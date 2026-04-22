@@ -22,7 +22,8 @@ LABEL description="GHDL + Verilator + cocotb environment for Axion Common"
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install dependencies
-RUN apt-get update && apt-get install -y \
+# --no-install-recommends prevents ghdl from pulling in Ubuntu's verilator 5.020
+RUN apt-get update && apt-get install -y --no-install-recommends \
     # Build tools
     build-essential \
     git \
@@ -41,6 +42,7 @@ RUN apt-get update && apt-get install -y \
     bison \
     libfl-dev \
     perl \
+    help2man \
     # Utilities
     curl \
     wget \
@@ -55,11 +57,16 @@ RUN git clone --depth=1 --branch v5.032 \
     && ./configure --prefix=/usr/local \
     && make -j$(nproc) \
     && make install \
-    && rm -rf /tmp/verilator
+    && rm -rf /tmp/verilator \
+    && /usr/local/bin/verilator --version
+
+# Ensure our compiled Verilator is found before any system-installed version
+ENV PATH="/usr/local/bin:${PATH}"
 
 # Verify tool versions
 RUN ghdl --version && echo "✓ GHDL installed" && \
-    verilator --version && echo "✓ Verilator installed"
+    verilator --version && echo "✓ Verilator installed" && \
+    grep -c "evalNeeded" $(verilator --getenv VERILATOR_ROOT)/include/verilated_vpi.h
 
 # Install Python packages globally
 # cocotb 2.0 pulls in cocotb-tools automatically; add it explicitly for clarity
