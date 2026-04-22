@@ -60,6 +60,12 @@ NC := \033[0m
 VENV_PYTHON := $(shell cd $(ROOT_DIR) && git rev-parse --show-toplevel 2>/dev/null)/venv/bin/python3
 PYTHON := $(shell if [ -x "$(VENV_PYTHON)" ]; then echo "$(VENV_PYTHON)"; else echo "python3"; fi)
 
+# Venv that contains cocotb + Verilator bindings (used for SV package tests)
+AXION_HDL_VENV := /home/bugra/Desktop/git/axion-hdl/venv
+
+# cocotb build dir for SV package tests
+SV_PKG_SIM_DIR := $(BUILD_DIR)/sv_pkg_sim
+
 # Find cocotb VPI library at runtime from whichever python3 is active
 COCOTB_VPI = $(shell $(PYTHON) -c \
 	"import os, cocotb; print(os.path.join(os.path.dirname(cocotb.__file__), 'libs', 'libcocotbvpi_ghdl.so'))" \
@@ -74,7 +80,7 @@ COCOTB_TB := tb_axion_axi_lite_bridge_cocotb
 # Targets
 ################################################################################
 
-.PHONY: all analyze test cocotb-test cocotb-analyze clean help dirs check-ghdl report
+.PHONY: all analyze test cocotb-test cocotb-analyze cocotb-sv-pkg-test clean help dirs check-ghdl report
 
 # Default target
 all: analyze
@@ -216,6 +222,31 @@ cocotb-test: cocotb-analyze
 	@echo "$(GREEN)✓ cocotb tests completed successfully$(NC)"
 	@echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"
 
+# Run SystemVerilog package cocotb tests via Verilator (Python runner)
+cocotb-sv-pkg-test:
+	@echo ""
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo "$(BLUE)  Axion Common - Running SV Package cocotb Tests (Verilator)$(NC)"
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo ""
+	@if [ ! -f "$(AXION_HDL_VENV)/bin/python3" ]; then \
+		echo "$(RED)Error: cocotb venv not found at $(AXION_HDL_VENV)$(NC)"; \
+		echo "  Ensure the axion-hdl venv is present and cocotb is installed."; \
+		exit 1; \
+	fi
+	@$(AXION_HDL_VENV)/bin/python3 $(TB_DIR)/run_sv_pkg_tests.py \
+		2>&1 | tee $(BUILD_DIR)/sv_pkg_cocotb_output.log; \
+	EXIT_CODE=$${PIPESTATUS[0]}; \
+	if [ $$EXIT_CODE -ne 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ SV Package cocotb tests FAILED (exit code: $$EXIT_CODE)$(NC)"; \
+		echo "$(BLUE)Log: $(BUILD_DIR)/sv_pkg_cocotb_output.log$(NC)"; \
+		exit $$EXIT_CODE; \
+	fi
+	@echo ""
+	@echo "$(GREEN)✓ SV Package cocotb tests completed successfully$(NC)"
+	@echo "$(BLUE)Log: $(BUILD_DIR)/sv_pkg_cocotb_output.log$(NC)"
+
 # Run tests using script (alternative)
 test-script:
 	@$(SCRIPT_DIR)/run_tests.sh
@@ -266,9 +297,10 @@ help:
 	@echo "  $(YELLOW)make all$(NC)        - Analyze all VHDL sources (default)"
 	@echo "  $(YELLOW)make analyze$(NC)    - Analyze VHDL sources"
 	@echo "  $(YELLOW)make elaborate$(NC)  - Elaborate testbench"
-	@echo "  $(YELLOW)make test$(NC)           - Run all VHDL tests and generate report"
-	@echo "  $(YELLOW)make cocotb-test$(NC)    - Run cocotb (Python) tests"
-	@echo "  $(YELLOW)make wave$(NC)           - Open waveform in GTKWave"
+	@echo "  $(YELLOW)make test$(NC)               - Run all VHDL tests and generate report"
+	@echo "  $(YELLOW)make cocotb-test$(NC)        - Run VHDL cocotb tests (GHDL)"
+	@echo "  $(YELLOW)make cocotb-sv-pkg-test$(NC) - Run SV package cocotb tests (Verilator)"
+	@echo "  $(YELLOW)make wave$(NC)               - Open waveform in GTKWave"
 	@echo "  $(YELLOW)make test-wave$(NC)      - Run tests and generate waveform (.ghw)"
 	@echo "  $(YELLOW)make view-wave$(NC)      - Run tests and open waveform in GTKWave"
 	@echo "  $(YELLOW)make report$(NC)         - Generate requirement verification report"

@@ -1,0 +1,50 @@
+################################################################################
+# Makefile.sv_pkg_test
+#
+# cocotb/Verilator simulation for the axion_common_pkg SystemVerilog package.
+#
+# Run from the repo root via:
+#   make cocotb-sv-pkg-test
+#
+# Or directly (from the tb/ directory):
+#   cd tb && PATH=<cocotb-venv>/bin:$PATH make -f Makefile.sv_pkg_test
+#
+# Copyright (c) 2024 Bugra Tufan
+# MIT License
+################################################################################
+
+# --------------------------------------------------------------------------
+# Simulator selection (Verilator is the default for SystemVerilog)
+# --------------------------------------------------------------------------
+SIM          ?= verilator
+TOPLEVEL_LANG = verilog
+
+# --------------------------------------------------------------------------
+# Source files (paths relative to tb/ where this Makefile is executed)
+# --------------------------------------------------------------------------
+VERILOG_SOURCES = $(abspath ../src/axion_common_pkg.sv) \
+                  $(abspath ./tb_axion_common_pkg_wrap.sv)
+
+# --------------------------------------------------------------------------
+# cocotb test module
+# --------------------------------------------------------------------------
+TOPLEVEL = tb_axion_common_pkg_wrap
+MODULE   = tb_axion_common_pkg_cocotb
+
+# --------------------------------------------------------------------------
+# Build output directory (inside the repo-level build/ folder)
+# --------------------------------------------------------------------------
+SIM_BUILD ?= $(abspath ../build/sv_pkg_sim)
+
+# --------------------------------------------------------------------------
+# Verilator flags
+#   --timing   : enables time-based simulation events (required for Clock)
+#   -Wno-*     : suppress noisy but harmless width-coerce warnings
+# --------------------------------------------------------------------------
+EXTRA_ARGS   += --timing
+COMPILE_ARGS += -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-UNOPTFLAT
+
+# --------------------------------------------------------------------------
+# cocotb Makefile.sim (auto-located via cocotb-config)
+# --------------------------------------------------------------------------
+include $(shell cocotb-config --makefiles)/Makefile.sim
