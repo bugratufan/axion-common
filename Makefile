@@ -13,6 +13,9 @@
 # MIT License
 ################################################################################
 
+# Use bash so PIPESTATUS works in recipes
+SHELL := /bin/bash
+
 # Tools
 GHDL := ghdl
 GHDL_STD := --std=08
@@ -60,8 +63,12 @@ NC := \033[0m
 VENV_PYTHON := $(shell cd $(ROOT_DIR) && git rev-parse --show-toplevel 2>/dev/null)/venv/bin/python3
 PYTHON := $(shell if [ -x "$(VENV_PYTHON)" ]; then echo "$(VENV_PYTHON)"; else echo "python3"; fi)
 
-# Venv that contains cocotb + Verilator bindings (used for SV package tests)
+# Venv that contains cocotb + Verilator bindings (used for SV package tests locally)
 AXION_HDL_VENV := /home/bugra/Desktop/git/axion-hdl/venv
+
+# Python for SV package tests: use venv if available, otherwise system python3
+# In Docker the venv does not exist so this naturally falls back to system python3
+PYTHON_FOR_SV := $(shell if [ -x "$(AXION_HDL_VENV)/bin/python3" ]; then echo "$(AXION_HDL_VENV)/bin/python3"; else echo "python3"; fi)
 
 # cocotb build dir for SV package tests
 SV_PKG_SIM_DIR := $(BUILD_DIR)/sv_pkg_sim
@@ -80,7 +87,7 @@ COCOTB_TB := tb_axion_axi_lite_bridge_cocotb
 # Targets
 ################################################################################
 
-.PHONY: all analyze test cocotb-test cocotb-analyze cocotb-sv-pkg-test clean help dirs check-ghdl report
+.PHONY: all analyze test cocotb-test cocotb-analyze cocotb-sv-pkg-test docker-test clean help dirs check-ghdl report
 
 # Default target
 all: analyze
@@ -113,19 +120,34 @@ elaborate: analyze
 	@$(GHDL) -e $(GHDL_ELAB_FLAGS) axion_axi_lite_bridge_tb
 	@echo "$(GREEN)✓ Testbench elaborated successfully$(NC)"
 
-# Run tests
+# Run ALL tests: VHDL suite then SV package suite
 test: elaborate
 	@echo ""
 	@echo "$(BLUE)================================================================================$(NC)"
-	@echo "$(BLUE)  Axion Common - Running Tests$(NC)"
+	@echo "$(BLUE)  Axion Common - Running All Tests$(NC)"
 	@echo "$(BLUE)================================================================================$(NC)"
 	@echo ""
 	@mkdir -p $(BUILD_DIR)
 	@mkdir -p $(REPORT_DIR)
+	@echo "$(YELLOW)>>> [1/2] VHDL tests (GHDL)...$(NC)"
 	@$(GHDL) -r $(GHDL_ELAB_FLAGS) axion_axi_lite_bridge_tb $(GHDL_RUN_FLAGS) --wave=$(WAVE_FILE) 2>&1 | tee $(TEST_OUTPUT)
 	@echo ""
 	@echo "$(GREEN)✓ Waveform generated: $(WAVE_FILE)$(NC)"
 	@$(MAKE) -s report
+	@echo ""
+	@echo "$(YELLOW)>>> [2/2] SV package cocotb tests (Verilator)...$(NC)"
+	@$(PYTHON_FOR_SV) $(TB_DIR)/run_sv_pkg_tests.py \
+		> $(BUILD_DIR)/sv_pkg_cocotb_output.log 2>&1; \
+	SV_EXIT=$$?; \
+	cat $(BUILD_DIR)/sv_pkg_cocotb_output.log; \
+	if [ $$SV_EXIT -ne 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ SV Package cocotb tests FAILED$(NC)"; \
+		echo "$(BLUE)Log: $(BUILD_DIR)/sv_pkg_cocotb_output.log$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)✓ SV Package cocotb tests passed$(NC)"
+	@echo "$(BLUE)Log: $(BUILD_DIR)/sv_pkg_cocotb_output.log$(NC)"
 
 # Generate requirement verification report
 report:
@@ -222,6 +244,15 @@ cocotb-test: cocotb-analyze
 	@echo "$(GREEN)✓ cocotb tests completed successfully$(NC)"
 	@echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"
 
+# Run all tests inside Docker (builds image if not present)
+docker-test:
+	@echo ""
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo "$(BLUE)  Axion Common - Running Tests in Docker$(NC)"
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo ""
+	@$(ROOT_DIR)/docker-run.sh make test
+
 # Run SystemVerilog package cocotb tests via Verilator (Python runner)
 cocotb-sv-pkg-test:
 	@echo ""
@@ -235,13 +266,14 @@ cocotb-sv-pkg-test:
 		exit 1; \
 	fi
 	@$(AXION_HDL_VENV)/bin/python3 $(TB_DIR)/run_sv_pkg_tests.py \
-		2>&1 | tee $(BUILD_DIR)/sv_pkg_cocotb_output.log; \
-	EXIT_CODE=$${PIPESTATUS[0]}; \
-	if [ $$EXIT_CODE -ne 0 ]; then \
+		> $(BUILD_DIR)/sv_pkg_cocotb_output.log 2>&1; \
+	SV_EXIT=$$?; \
+	cat $(BUILD_DIR)/sv_pkg_cocotb_output.log; \
+	if [ $$SV_EXIT -ne 0 ]; then \
 		echo ""; \
-		echo "$(RED)✗ SV Package cocotb tests FAILED (exit code: $$EXIT_CODE)$(NC)"; \
+		echo "$(RED)✗ SV Package cocotb tests FAILED$(NC)"; \
 		echo "$(BLUE)Log: $(BUILD_DIR)/sv_pkg_cocotb_output.log$(NC)"; \
-		exit $$EXIT_CODE; \
+		exit 1; \
 	fi
 	@echo ""
 	@echo "$(GREEN)✓ SV Package cocotb tests completed successfully$(NC)"
@@ -297,9 +329,10 @@ help:
 	@echo "  $(YELLOW)make all$(NC)        - Analyze all VHDL sources (default)"
 	@echo "  $(YELLOW)make analyze$(NC)    - Analyze VHDL sources"
 	@echo "  $(YELLOW)make elaborate$(NC)  - Elaborate testbench"
-	@echo "  $(YELLOW)make test$(NC)               - Run all VHDL tests and generate report"
-	@echo "  $(YELLOW)make cocotb-test$(NC)        - Run VHDL cocotb tests (GHDL)"
-	@echo "  $(YELLOW)make cocotb-sv-pkg-test$(NC) - Run SV package cocotb tests (Verilator)"
+	@echo "  $(YELLOW)make test$(NC)               - Run ALL tests: VHDL + SV package (default CI target)"
+	@echo "  $(YELLOW)make docker-test$(NC)        - Run all tests inside Docker container"
+	@echo "  $(YELLOW)make cocotb-test$(NC)        - Run VHDL cocotb tests only (GHDL)"
+	@echo "  $(YELLOW)make cocotb-sv-pkg-test$(NC) - Run SV package cocotb tests only (Verilator)"
 	@echo "  $(YELLOW)make wave$(NC)               - Open waveform in GTKWave"
 	@echo "  $(YELLOW)make test-wave$(NC)      - Run tests and generate waveform (.ghw)"
 	@echo "  $(YELLOW)make view-wave$(NC)      - Run tests and open waveform in GTKWave"

@@ -2,7 +2,10 @@
 ################################################################################
 # Axion Common - Docker Test Runner
 #
-# Runs tests inside a Docker container with GHDL 4.1.0 and cocotb
+# Builds (or pulls) the Docker image and runs the requested command inside it.
+# By default runs 'make test' which executes ALL tests:
+#   - VHDL simulation tests (GHDL)
+#   - SystemVerilog package cocotb tests (Verilator)
 #
 # Usage:
 #   ./docker-run.sh [command] [args...]
@@ -13,10 +16,10 @@
 #   sh script.sh       Run arbitrary script/command
 #
 # Examples:
-#   ./docker-run.sh make test          # Run VHDL tests
-#   ./docker-run.sh make cocotb-test   # Run cocotb tests
+#   ./docker-run.sh                    # Run ALL tests (default)
+#   ./docker-run.sh make test          # Run ALL tests (explicit)
+#   ./docker-run.sh make cocotb-test   # Run VHDL cocotb tests only
 #   ./docker-run.sh bash               # Interactive shell
-#   ./docker-run.sh make clean all     # Clean and analyze
 #
 # Copyright (c) 2024 Bugra Tufan
 # MIT License
@@ -89,7 +92,7 @@ setup_image() {
 
     # Build locally
     print_step "Building Docker image locally..."
-    docker build -t "$IMAGE_NAME" "$SCRIPT_DIR"
+    docker build --network=host -t "$IMAGE_NAME" "$SCRIPT_DIR"
     print_success "Docker image built: $IMAGE_NAME"
 }
 
@@ -106,18 +109,18 @@ Commands:
   sh [script]        Run arbitrary script/command
 
 Make targets:
-  make test          Run VHDL tests
-  make cocotb-test   Run cocotb (Python) tests
-  make all           Analyze VHDL sources
-  make clean         Clean build artifacts
-  make help          Show Makefile help
+  make test              Run ALL tests: VHDL + SV package (default)
+  make cocotb-test       Run VHDL cocotb tests (GHDL)
+  make cocotb-sv-pkg-test Run SV package tests (Verilator)
+  make all               Analyze VHDL sources
+  make clean             Clean build artifacts
+  make help              Show Makefile help
 
 Examples:
-  ./docker-run.sh                    # Run 'make test' (default)
-  ./docker-run.sh make test
-  ./docker-run.sh make cocotb-test
-  ./docker-run.sh bash
-  ./docker-run.sh make clean all
+  ./docker-run.sh                    # Run ALL tests (default)
+  ./docker-run.sh make test          # Run ALL tests (explicit)
+  ./docker-run.sh make cocotb-test   # Run VHDL cocotb tests only
+  ./docker-run.sh bash               # Interactive shell
 
 Environment:
   DOCKER_OPTS        Additional Docker options (e.g., '-e DEBUG=1')
