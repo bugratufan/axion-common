@@ -13,6 +13,9 @@
 # MIT License
 ################################################################################
 
+# Use bash so PIPESTATUS works in recipes
+SHELL := /bin/bash
+
 # Tools
 GHDL := ghdl
 GHDL_STD := --std=08
@@ -60,6 +63,15 @@ NC := \033[0m
 VENV_PYTHON := $(shell cd $(ROOT_DIR) && git rev-parse --show-toplevel 2>/dev/null)/venv/bin/python3
 PYTHON := $(shell if [ -x "$(VENV_PYTHON)" ]; then echo "$(VENV_PYTHON)"; else echo "python3"; fi)
 
+# Venv that contains cocotb + Verilator bindings for SV package tests.
+# Defaults to the repo-local ./venv; override AXION_HDL_VENV via make or environment
+# if your cocotb/Verilator venv lives elsewhere.
+AXION_HDL_VENV ?= $(ROOT_DIR)/venv
+
+# Python for SV package tests: use venv if available, otherwise system python3
+# In Docker the venv does not exist so this naturally falls back to system python3
+PYTHON_FOR_SV := $(shell if [ -x "$(AXION_HDL_VENV)/bin/python3" ]; then echo "$(AXION_HDL_VENV)/bin/python3"; else echo "python3"; fi)
+
 # Find cocotb VPI library at runtime from whichever python3 is active
 COCOTB_VPI = $(shell $(PYTHON) -c \
 	"import os, cocotb; print(os.path.join(os.path.dirname(cocotb.__file__), 'libs', 'libcocotbvpi_ghdl.so'))" \
@@ -70,11 +82,18 @@ COCOTB_BUILD_DIR := $(BUILD_DIR)/cocotb_sim
 WRAP_SRC := $(TB_DIR)/axion_axi_lite_bridge_wrap.vhd
 COCOTB_TB := tb_axion_axi_lite_bridge_cocotb
 
+# GHDL generic overrides for the cocotb wrapper.
+# G_TIMEOUT_WIDTH=8 → 256-cycle bridge timeout, matching the cocotb test assumptions.
+COCOTB_GHDL_GENERICS := -gG_TIMEOUT_WIDTH=8
+
+# Docker image tag used by CI (ci.yml).  Must match the tags: field in the workflow.
+CI_IMAGE := axion-common:ci
+
 ################################################################################
 # Targets
 ################################################################################
 
-.PHONY: all analyze test cocotb-test cocotb-analyze clean help dirs check-ghdl report
+.PHONY: all analyze test cocotb-test cocotb-analyze cocotb-sv-pkg-test docker-test local-ci-test clean help dirs check-ghdl report
 
 # Default target
 all: analyze
@@ -107,19 +126,41 @@ elaborate: analyze
 	@$(GHDL) -e $(GHDL_ELAB_FLAGS) axion_axi_lite_bridge_tb
 	@echo "$(GREEN)✓ Testbench elaborated successfully$(NC)"
 
-# Run tests
+# Run ALL tests: VHDL suite then SV package suite
 test: elaborate
 	@echo ""
 	@echo "$(BLUE)================================================================================$(NC)"
-	@echo "$(BLUE)  Axion Common - Running Tests$(NC)"
+	@echo "$(BLUE)  Axion Common - Running All Tests$(NC)"
 	@echo "$(BLUE)================================================================================$(NC)"
 	@echo ""
 	@mkdir -p $(BUILD_DIR)
 	@mkdir -p $(REPORT_DIR)
-	@$(GHDL) -r $(GHDL_ELAB_FLAGS) axion_axi_lite_bridge_tb $(GHDL_RUN_FLAGS) --wave=$(WAVE_FILE) 2>&1 | tee $(TEST_OUTPUT)
+	@echo "$(YELLOW)>>> [1/2] VHDL tests (GHDL)...$(NC)"
+	@$(GHDL) -r $(GHDL_ELAB_FLAGS) axion_axi_lite_bridge_tb $(GHDL_RUN_FLAGS) --wave=$(WAVE_FILE) 2>&1 | tee $(TEST_OUTPUT); \
+	GHDL_EXIT=$${PIPESTATUS[0]}; \
+	if [ $$GHDL_EXIT -ne 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ VHDL tests FAILED$(NC)"; \
+		echo "$(BLUE)Log: $(TEST_OUTPUT)$(NC)"; \
+		exit 1; \
+	fi
 	@echo ""
 	@echo "$(GREEN)✓ Waveform generated: $(WAVE_FILE)$(NC)"
 	@$(MAKE) -s report
+	@echo ""
+	@echo "$(YELLOW)>>> [2/2] SV package cocotb tests (Verilator)...$(NC)"
+	@$(PYTHON_FOR_SV) $(TB_DIR)/run_sv_pkg_tests.py \
+		> $(BUILD_DIR)/sv_pkg_cocotb_output.log 2>&1; \
+	SV_EXIT=$$?; \
+	cat $(BUILD_DIR)/sv_pkg_cocotb_output.log; \
+	if [ $$SV_EXIT -ne 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ SV Package cocotb tests FAILED$(NC)"; \
+		echo "$(BLUE)Log: $(BUILD_DIR)/sv_pkg_cocotb_output.log$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)✓ SV Package cocotb tests passed$(NC)"
+	@echo "$(BLUE)Log: $(BUILD_DIR)/sv_pkg_cocotb_output.log$(NC)"
 
 # Generate requirement verification report
 report:
@@ -182,7 +223,7 @@ cocotb-analyze: analyze
 	$(GHDL) -a $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) $(WRAP_SRC) || \
 		(echo "$(RED)✗ Failed to analyze wrapper$(NC)" && exit 1)
 	@echo "  ✓ axion_axi_lite_bridge_wrap.vhd"
-	$(GHDL) -e $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) axion_axi_lite_bridge_wrap || \
+	$(GHDL) -e $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) $(COCOTB_GHDL_GENERICS) axion_axi_lite_bridge_wrap || \
 		(echo "$(RED)✗ Failed to elaborate wrapper$(NC)" && exit 1)
 	@echo "$(GREEN)✓ Wrapper elaborated successfully$(NC)"
 
@@ -199,22 +240,85 @@ cocotb-test: cocotb-analyze
 		exit 1; \
 	fi
 	@echo "$(YELLOW)>>> Running cocotb simulation...$(NC)"
-	@cd $(TB_DIR) && MODULE=$(COCOTB_TB) \
+	@cd $(TB_DIR) && COCOTB_TEST_MODULES=$(COCOTB_TB) \
 		PYTHONPATH=$(TB_DIR) \
+		PYGPI_PYTHON_BIN=$(PYTHON) \
 		$(GHDL) -r $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) \
+		$(COCOTB_GHDL_GENERICS) \
 		axion_axi_lite_bridge_wrap \
 		--vpi=$(COCOTB_VPI) \
 		--stop-time=1ms 2>&1 | tee $(BUILD_DIR)/cocotb_output.log; \
-	EXIT_CODE=$$?; \
-	if [ $$EXIT_CODE -ne 0 ]; then \
+	GHDL_EXIT=$${PIPESTATUS[0]}; \
+	if [ $$GHDL_EXIT -ne 0 ]; then \
 		echo ""; \
-		echo "$(RED)✗ cocotb tests FAILED (exit code: $$EXIT_CODE)$(NC)"; \
+		echo "$(RED)✗ cocotb tests FAILED (exit code: $$GHDL_EXIT)$(NC)"; \
 		echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"; \
-		exit $$EXIT_CODE; \
+		exit $$GHDL_EXIT; \
+	fi; \
+	FAIL_COUNT=$$(grep -oP 'FAIL=\K[0-9]+' $(BUILD_DIR)/cocotb_output.log | tail -1); \
+	if [ -n "$$FAIL_COUNT" ] && [ "$$FAIL_COUNT" -gt 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ cocotb tests FAILED ($$FAIL_COUNT test(s) failed)$(NC)"; \
+		echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"; \
+		exit 1; \
 	fi
 	@echo ""
 	@echo "$(GREEN)✓ cocotb tests completed successfully$(NC)"
 	@echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"
+
+# Reproduce the exact CI environment locally.
+# Builds the image with the CI tag first, then runs both test jobs as CI does.
+# Run this before pushing to catch failures without waiting for GitHub Actions.
+local-ci-test:
+	@echo ""
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo "$(BLUE)  Local CI Simulation (axion-common:ci image)$(NC)"
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo "$(YELLOW)>>> Building $(CI_IMAGE) image...$(NC)"
+	docker build -t $(CI_IMAGE) $(ROOT_DIR)
+	@echo ""
+	@echo "$(YELLOW)>>> Running VHDL tests (mirrors CI 'test' job)...$(NC)"
+	docker run --rm -v $(ROOT_DIR):/workspace $(CI_IMAGE) make test
+	@echo ""
+	@echo "$(YELLOW)>>> Running cocotb tests (mirrors CI 'cocotb-test' job)...$(NC)"
+	docker run --rm -v $(ROOT_DIR):/workspace $(CI_IMAGE) make cocotb-test
+	@echo ""
+	@echo "$(GREEN)✓ All local CI checks passed$(NC)"
+
+# Run all tests inside Docker (builds image if not present)
+docker-test:
+	@echo ""
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo "$(BLUE)  Axion Common - Running Tests in Docker$(NC)"
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo ""
+	@$(ROOT_DIR)/docker-run.sh make test
+
+# Run SystemVerilog package cocotb tests via Verilator (Python runner)
+cocotb-sv-pkg-test:
+	@echo ""
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo "$(BLUE)  Axion Common - Running SV Package cocotb Tests (Verilator)$(NC)"
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo ""
+	@if [ ! -f "$(AXION_HDL_VENV)/bin/python3" ]; then \
+		echo "$(RED)Error: cocotb venv not found at $(AXION_HDL_VENV)$(NC)"; \
+		echo "  Ensure the axion-hdl venv is present and cocotb is installed."; \
+		exit 1; \
+	fi
+	@$(AXION_HDL_VENV)/bin/python3 $(TB_DIR)/run_sv_pkg_tests.py \
+		> $(BUILD_DIR)/sv_pkg_cocotb_output.log 2>&1; \
+	SV_EXIT=$$?; \
+	cat $(BUILD_DIR)/sv_pkg_cocotb_output.log; \
+	if [ $$SV_EXIT -ne 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ SV Package cocotb tests FAILED$(NC)"; \
+		echo "$(BLUE)Log: $(BUILD_DIR)/sv_pkg_cocotb_output.log$(NC)"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "$(GREEN)✓ SV Package cocotb tests completed successfully$(NC)"
+	@echo "$(BLUE)Log: $(BUILD_DIR)/sv_pkg_cocotb_output.log$(NC)"
 
 # Run tests using script (alternative)
 test-script:
@@ -266,9 +370,11 @@ help:
 	@echo "  $(YELLOW)make all$(NC)        - Analyze all VHDL sources (default)"
 	@echo "  $(YELLOW)make analyze$(NC)    - Analyze VHDL sources"
 	@echo "  $(YELLOW)make elaborate$(NC)  - Elaborate testbench"
-	@echo "  $(YELLOW)make test$(NC)           - Run all VHDL tests and generate report"
-	@echo "  $(YELLOW)make cocotb-test$(NC)    - Run cocotb (Python) tests"
-	@echo "  $(YELLOW)make wave$(NC)           - Open waveform in GTKWave"
+	@echo "  $(YELLOW)make test$(NC)               - Run ALL tests: VHDL + SV package (default CI target)"
+	@echo "  $(YELLOW)make docker-test$(NC)        - Run all tests inside Docker container"
+	@echo "  $(YELLOW)make cocotb-test$(NC)        - Run VHDL cocotb tests only (GHDL)"
+	@echo "  $(YELLOW)make cocotb-sv-pkg-test$(NC) - Run SV package cocotb tests only (Verilator)"
+	@echo "  $(YELLOW)make wave$(NC)               - Open waveform in GTKWave"
 	@echo "  $(YELLOW)make test-wave$(NC)      - Run tests and generate waveform (.ghw)"
 	@echo "  $(YELLOW)make view-wave$(NC)      - Run tests and open waveform in GTKWave"
 	@echo "  $(YELLOW)make report$(NC)         - Generate requirement verification report"

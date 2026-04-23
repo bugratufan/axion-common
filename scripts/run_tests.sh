@@ -2,12 +2,15 @@
 ################################################################################
 # Axion Common - Test Runner Script
 #
-# Runs VHDL tests using GHDL and generates requirement verification report
+# Runs VHDL tests (GHDL) and SV package tests (cocotb/Verilator)
+# and generates a combined requirement verification report.
 #
 # Usage: ./run_tests.sh [options]
 #   Options:
 #     -v, --verbose    Show detailed output
 #     -c, --clean      Clean build artifacts before running
+#     --sv             Also run SystemVerilog package cocotb tests
+#     --sv-only        Run only the SystemVerilog package cocotb tests
 #     -h, --help       Show this help message
 #
 # Copyright (c) 2024 Bugra Tufan
@@ -45,9 +48,17 @@ GHDL_RUN_FLAGS="--stop-time=100ms"
 TEST_OUTPUT="$BUILD_DIR/test_output.log"
 REPORT_FILE="$REPORT_DIR/requirement_verification.md"
 
+# cocotb/Verilator venv (for SV package tests).
+# Defaults to the repo-local ./venv; override AXION_HDL_VENV via environment
+# if your cocotb/Verilator venv lives elsewhere.
+AXION_HDL_VENV="${AXION_HDL_VENV:-$ROOT_DIR/venv}"
+SV_PKG_LOG="$BUILD_DIR/sv_pkg_cocotb_output.log"
+
 # Options
 VERBOSE=0
 CLEAN=0
+RUN_SV=0
+SV_ONLY=0
 
 ################################################################################
 # Functions
@@ -81,8 +92,36 @@ show_help() {
     echo "Options:"
     echo "  -v, --verbose    Show detailed output"
     echo "  -c, --clean      Clean build artifacts before running"
+    echo "  --sv             Also run SystemVerilog package cocotb tests (Verilator)"
+    echo "  --sv-only        Run only the SystemVerilog package cocotb tests"
     echo "  -h, --help       Show this help message"
     echo ""
+}
+
+run_sv_pkg_tests() {
+    print_step "Running SystemVerilog package cocotb tests (Verilator)..."
+
+    if [ ! -f "$AXION_HDL_VENV/bin/python3" ]; then
+        print_error "cocotb venv not found at $AXION_HDL_VENV"
+        echo "  Install cocotb and cocotb-tools in your active Python environment,"
+        echo "  or set AXION_HDL_VENV to the path of a venv that contains them."
+        exit 1
+    fi
+
+    mkdir -p "$BUILD_DIR/sv_pkg_sim"
+
+    "$AXION_HDL_VENV/bin/python3" "$TB_DIR/run_sv_pkg_tests.py" \
+        2>&1 | tee "$SV_PKG_LOG"
+
+    local exit_code=${PIPESTATUS[0]}
+    if [ $exit_code -ne 0 ]; then
+        print_error "SV package cocotb tests FAILED"
+        echo "  Log: $SV_PKG_LOG"
+        return $exit_code
+    fi
+
+    print_success "SV package cocotb tests passed"
+    echo "  Log: $SV_PKG_LOG"
 }
 
 clean_build() {
@@ -278,6 +317,14 @@ while [[ $# -gt 0 ]]; do
             CLEAN=1
             shift
             ;;
+        --sv)
+            RUN_SV=1
+            shift
+            ;;
+        --sv-only)
+            SV_ONLY=1
+            shift
+            ;;
         -h|--help)
             show_help
             exit 0
@@ -297,19 +344,29 @@ if [ $CLEAN -eq 1 ]; then
     clean_build
 fi
 
-check_ghdl
-setup_directories
-analyze_sources
-elaborate_testbench
-run_tests
-RESULTS=$(generate_report)
+EXIT_CODE=0
 
-print_summary "$RESULTS"
-EXIT_CODE=$?
+# VHDL tests (skip when --sv-only)
+if [ $SV_ONLY -eq 0 ]; then
+    check_ghdl
+    setup_directories
+    analyze_sources
+    elaborate_testbench
+    run_tests
+    RESULTS=$(generate_report)
 
-echo ""
-echo "Report available at: $REPORT_FILE"
-echo "Test output at: $TEST_OUTPUT"
-echo ""
+    print_summary "$RESULTS" || EXIT_CODE=$?
+
+    echo ""
+    echo "Report available at: $REPORT_FILE"
+    echo "Test output at:      $TEST_OUTPUT"
+    echo ""
+fi
+
+# SV package tests (--sv or --sv-only)
+if [ $RUN_SV -eq 1 ] || [ $SV_ONLY -eq 1 ]; then
+    print_header "Axion Common - SV Package Tests"
+    run_sv_pkg_tests || EXIT_CODE=$?
+fi
 
 exit $EXIT_CODE
