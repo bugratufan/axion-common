@@ -48,8 +48,10 @@ GHDL_RUN_FLAGS="--stop-time=100ms"
 TEST_OUTPUT="$BUILD_DIR/test_output.log"
 REPORT_FILE="$REPORT_DIR/requirement_verification.md"
 
-# cocotb/Verilator venv (for SV package tests)
-AXION_HDL_VENV="/home/bugra/Desktop/git/axion-hdl/venv"
+# cocotb/Verilator venv (for SV package tests).
+# Defaults to the repo-local ./venv; override AXION_HDL_VENV via environment
+# if your cocotb/Verilator venv lives elsewhere.
+AXION_HDL_VENV="${AXION_HDL_VENV:-$ROOT_DIR/venv}"
 SV_PKG_LOG="$BUILD_DIR/sv_pkg_cocotb_output.log"
 
 # Options
@@ -101,7 +103,8 @@ run_sv_pkg_tests() {
 
     if [ ! -f "$AXION_HDL_VENV/bin/python3" ]; then
         print_error "cocotb venv not found at $AXION_HDL_VENV"
-        echo "  Ensure the axion-hdl venv is present and cocotb is installed."
+        echo "  Install cocotb and cocotb-tools in your active Python environment,"
+        echo "  or set AXION_HDL_VENV to the path of a venv that contains them."
         exit 1
     fi
 
