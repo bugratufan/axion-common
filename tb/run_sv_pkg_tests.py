@@ -44,8 +44,11 @@ def main():
     try:
         from cocotb_tools.runner import get_runner
     except ImportError:
-        print("ERROR: cocotb not found.  Activate the axion-hdl venv first:")
-        print("  source /home/bugra/Desktop/git/axion-hdl/venv/bin/activate")
+        print("ERROR: cocotb runner support not found.")
+        print("Install 'cocotb' and 'cocotb-tools' in your active Python environment,")
+        print("or activate the project's virtual environment before running this script.")
+        print("If you use a custom interpreter/venv, run the script with that Python")
+        print("or set the appropriate PYTHON/venv path override for your environment.")
         sys.exit(1)
 
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
