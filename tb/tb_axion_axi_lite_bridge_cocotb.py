@@ -818,31 +818,52 @@ async def test_late_awready(dut):
 
 @cocotb.test()
 async def test_bready_backpressure(dut):
-    """NEW-001: write with bready_delay=8; verify bvalid high those 8 cycles; bresp=OKAY."""
+    """NEW-001: once bvalid asserts, hold bready=0 for DELAY cycles; bvalid must stay
+    high throughout (AXI4 Lite §A3.3 handshake stability); bresp=OKAY."""
     master, slaves = await setup(dut)
     _set_all_slaves(slaves, MODE_OKAY)
 
     DELAY = 8
-    bvalid_count = 0
 
-    # Start the write; bready_delay keeps bready=0 for 8 cycles after bvalid
-    # We monitor bvalid during that window
-    async def monitor_bvalid(cycles):
-        nonlocal bvalid_count
-        for _ in range(cycles + 2):
-            await RisingEdge(dut.i_clk)
-            if int(dut.m_bvalid.value) == 1:
-                bvalid_count += 1
+    # Issue AW+W simultaneously, drive bready manually so we control timing exactly.
+    dut.m_awaddr.value  = 0x1000
+    dut.m_awprot.value  = 0
+    dut.m_awvalid.value = 1
+    dut.m_wdata.value   = 0xAA
+    dut.m_wstrb.value   = 0xF
+    dut.m_wvalid.value  = 1
+    dut.m_bready.value  = 0
 
-    # Start write coroutine
-    write_coro = cocotb.start_soon(master.write(0x1000, 0xAA, bready_delay=DELAY))
-    monitor = cocotb.start_soon(monitor_bvalid(DELAY + 4))
+    # Wait for AW+W handshake
+    aw_done = w_done = False
+    while not (aw_done and w_done):
+        await RisingEdge(dut.i_clk)
+        if not aw_done and int(dut.m_awready.value) == 1:
+            dut.m_awvalid.value = 0
+            aw_done = True
+        if not w_done and int(dut.m_wready.value) == 1:
+            dut.m_wvalid.value = 0
+            w_done = True
 
-    bresp = await write_coro
-    await monitor
+    # Wait for bvalid to first go high (bridge response ready)
+    while True:
+        await RisingEdge(dut.i_clk)
+        if int(dut.m_bvalid.value) == 1:
+            break
 
-    assert bvalid_count >= DELAY, \
-        f"bvalid only seen {bvalid_count} cycles, expected >= {DELAY}"
+    # bvalid is now high. Verify it stays high for DELAY cycles while bready=0.
+    for cycle in range(DELAY - 1):
+        await RisingEdge(dut.i_clk)
+        assert int(dut.m_bvalid.value) == 1, \
+            f"bvalid dropped at backpressure cycle {cycle + 1}/{DELAY - 1} before bready (AXI4 violation)"
+
+    # Accept the response
+    dut.m_bready.value = 1
+    await RisingEdge(dut.i_clk)
+    assert int(dut.m_bvalid.value) == 1, "bvalid must still be high when bready is first asserted"
+    bresp = int(dut.m_bresp.value)
+    dut.m_bready.value = 0
+
     assert bresp == AXI_RESP_OKAY, f"Expected OKAY, got {bresp}"
     dut._log.info("[PASS] NEW-001 - bvalid held high under bready backpressure")
 

@@ -82,11 +82,18 @@ COCOTB_BUILD_DIR := $(BUILD_DIR)/cocotb_sim
 WRAP_SRC := $(TB_DIR)/axion_axi_lite_bridge_wrap.vhd
 COCOTB_TB := tb_axion_axi_lite_bridge_cocotb
 
+# GHDL generic overrides for the cocotb wrapper.
+# G_TIMEOUT_WIDTH=8 → 256-cycle bridge timeout, matching the cocotb test assumptions.
+COCOTB_GHDL_GENERICS := -gG_TIMEOUT_WIDTH=8
+
+# Docker image tag used by CI (ci.yml).  Must match the tags: field in the workflow.
+CI_IMAGE := axion-common:ci
+
 ################################################################################
 # Targets
 ################################################################################
 
-.PHONY: all analyze test cocotb-test cocotb-analyze cocotb-sv-pkg-test docker-test clean help dirs check-ghdl report
+.PHONY: all analyze test cocotb-test cocotb-analyze cocotb-sv-pkg-test docker-test local-ci-test clean help dirs check-ghdl report
 
 # Default target
 all: analyze
@@ -216,7 +223,7 @@ cocotb-analyze: analyze
 	$(GHDL) -a $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) $(WRAP_SRC) || \
 		(echo "$(RED)✗ Failed to analyze wrapper$(NC)" && exit 1)
 	@echo "  ✓ axion_axi_lite_bridge_wrap.vhd"
-	$(GHDL) -e $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) axion_axi_lite_bridge_wrap || \
+	$(GHDL) -e $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) $(COCOTB_GHDL_GENERICS) axion_axi_lite_bridge_wrap || \
 		(echo "$(RED)✗ Failed to elaborate wrapper$(NC)" && exit 1)
 	@echo "$(GREEN)✓ Wrapper elaborated successfully$(NC)"
 
@@ -237,6 +244,7 @@ cocotb-test: cocotb-analyze
 		PYTHONPATH=$(TB_DIR) \
 		PYGPI_PYTHON_BIN=$(PYTHON) \
 		$(GHDL) -r $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) \
+		$(COCOTB_GHDL_GENERICS) \
 		axion_axi_lite_bridge_wrap \
 		--vpi=$(COCOTB_VPI) \
 		--stop-time=1ms 2>&1 | tee $(BUILD_DIR)/cocotb_output.log; \
@@ -257,6 +265,25 @@ cocotb-test: cocotb-analyze
 	@echo ""
 	@echo "$(GREEN)✓ cocotb tests completed successfully$(NC)"
 	@echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"
+
+# Reproduce the exact CI environment locally.
+# Builds the image with the CI tag first, then runs both test jobs as CI does.
+# Run this before pushing to catch failures without waiting for GitHub Actions.
+local-ci-test:
+	@echo ""
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo "$(BLUE)  Local CI Simulation (axion-common:ci image)$(NC)"
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo "$(YELLOW)>>> Building $(CI_IMAGE) image...$(NC)"
+	docker build -t $(CI_IMAGE) $(ROOT_DIR)
+	@echo ""
+	@echo "$(YELLOW)>>> Running VHDL tests (mirrors CI 'test' job)...$(NC)"
+	docker run --rm -v $(ROOT_DIR):/workspace $(CI_IMAGE) make test
+	@echo ""
+	@echo "$(YELLOW)>>> Running cocotb tests (mirrors CI 'cocotb-test' job)...$(NC)"
+	docker run --rm -v $(ROOT_DIR):/workspace $(CI_IMAGE) make cocotb-test
+	@echo ""
+	@echo "$(GREEN)✓ All local CI checks passed$(NC)"
 
 # Run all tests inside Docker (builds image if not present)
 docker-test:
