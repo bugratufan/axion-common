@@ -1,0 +1,137 @@
+################################################################################
+# Version Preview Workflow — Axion-Common
+#
+# Triggered on every PR that targets `main` (develop → main release PR).
+#
+# Analyses which branches have been merged to develop since the last main
+# release and previews the version that will be created on merge.
+# No files are committed — the actual bump + commit + release happens in
+# cd.yml after the PR merges to main.
+#
+# Logic:
+#   1. If .version was manually edited in the PR branch  →  use it as-is.
+#   2. Otherwise inspect merge commits between the last main tip and HEAD:
+#        • Any feature/* or feat/* branch found  →  MINOR bump
+#        • Only fix/* / other branches           →  PATCH bump
+#        • No new commits                        →  no bump
+################################################################################
+
+name: Version Preview
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  version-preview:
+    name: Preview release version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ------------------------------------------------------------------
+      # Step 1 — was .version manually changed in this PR?
+      # ------------------------------------------------------------------
+      - name: Check if .version was manually modified
+        id: version-check
+        run: |
+          git fetch origin main
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+
+          if echo "$CHANGED_FILES" | grep -q "^\.version$"; then
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+            echo "📝 .version was manually edited in this PR — will be used as-is"
+          else
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+            echo "🔄 .version not changed — will analyse merged branches"
+          fi
+
+      # ------------------------------------------------------------------
+      # Step 2 — analyse which branch types were merged into develop
+      # ------------------------------------------------------------------
+      - name: Analyse merged branch origins
+        id: analyze
+        if: steps.version-check.outputs.version_changed == 'false'
+        run: |
+          git fetch origin main develop
+
+          # All merge commits that are in develop (HEAD) but not yet in main.
+          # These represent every branch merged since the last release.
+          MERGE_COMMITS=$(git log origin/main..HEAD --oneline --merges 2>/dev/null || true)
+          CURRENT_BRANCH="${{ github.head_ref }}"
+
+          echo "── Merge commits since last main ──────────────────────────"
+          echo "${MERGE_COMMITS:-  (none found)}"
+          echo "── Current PR branch: $CURRENT_BRANCH ─────────────────────"
+
+          HAS_FEATURE=false
+
+          if echo "$MERGE_COMMITS" | grep -qiE "(feature/|feat/)"; then
+            HAS_FEATURE=true
+            echo "✅ Feature branch detected via merge commit messages"
+          fi
+
+          if [[ "$CURRENT_BRANCH" == feature/* ]] || [[ "$CURRENT_BRANCH" == feat/* ]]; then
+            HAS_FEATURE=true
+            echo "✅ PR branch itself is a feature branch"
+          fi
+
+          ALL_COMMITS=$(git log origin/main..HEAD --oneline 2>/dev/null || true)
+
+          if [ "$HAS_FEATURE" = true ]; then
+            echo "bump_type=minor"  >> $GITHUB_OUTPUT
+            echo "should_bump=true" >> $GITHUB_OUTPUT
+            echo "📦 Decision: bump MINOR (feature branch detected)"
+          elif [ -n "$ALL_COMMITS" ]; then
+            echo "bump_type=patch"  >> $GITHUB_OUTPUT
+            echo "should_bump=true" >> $GITHUB_OUTPUT
+            echo "🔧 Decision: bump PATCH (fix / other changes only)"
+          else
+            echo "should_bump=false" >> $GITHUB_OUTPUT
+            echo "⏭️  Decision: no bump (no new commits)"
+          fi
+
+      # ------------------------------------------------------------------
+      # Step 3 — compute and display the proposed version (no file write)
+      # ------------------------------------------------------------------
+      - name: Show proposed release version
+        run: |
+          CURRENT=$(cat .version)
+          VERSION_CHANGED="${{ steps.version-check.outputs.version_changed }}"
+          SHOULD_BUMP="${{ steps.analyze.outputs.should_bump }}"
+          BUMP_TYPE="${{ steps.analyze.outputs.bump_type }}"
+
+          echo "## 🏷️ Release version preview" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$VERSION_CHANGED" = "true" ]; then
+            echo "**.version was manually set → will release \`$CURRENT\`**" >> $GITHUB_STEP_SUMMARY
+          elif [ "$SHOULD_BUMP" = "true" ]; then
+            python scripts/bump_version.py --bump "$BUMP_TYPE"
+            NEW_VERSION=$(cat .version)
+            echo "| | Version |"         >> $GITHUB_STEP_SUMMARY
+            echo "|---|---|"             >> $GITHUB_STEP_SUMMARY
+            echo "| Current  | \`$CURRENT\` |"              >> $GITHUB_STEP_SUMMARY
+            echo "| On merge | \`$NEW_VERSION\` ($BUMP_TYPE bump) |" >> $GITHUB_STEP_SUMMARY
+            echo ""
+            echo "🚀 Merging this PR will release v$NEW_VERSION"
+          else
+            echo "No version bump needed — no new commits since last release." >> $GITHUB_STEP_SUMMARY
+          fi
+          # NOTE: .version may have been modified locally above for preview
+          # purposes but this job never commits or pushes anything.

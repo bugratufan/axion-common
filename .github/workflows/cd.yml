@@ -4,36 +4,127 @@ on:
   push:
     branches:
       - main
-    paths:
-      - '.version'
 
 jobs:
   release:
-    name: Create Release
+    name: Bump version and create release
     runs-on: ubuntu-latest
+    # Skip commits made by this workflow itself to avoid infinite loop
+    if: github.actor != 'github-actions[bot]'
     permissions:
       contents: write
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read Version
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ------------------------------------------------------------------
+      # Step 1 — determine the new version
+      #
+      # If .version was manually changed in the merge commit (compared to
+      # the previous main tip) → use it as-is.
+      # Otherwise analyse merge commits since the previous main tip:
+      #   feature/* or feat/* found  →  MINOR bump
+      #   only fix/* / other         →  PATCH bump
+      # ------------------------------------------------------------------
+      - name: Determine version
         id: version
+        run: |
+          # Previous main tip = first parent of the current HEAD (the merge commit)
+          PREV_MAIN=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+
+          if [ -n "$PREV_MAIN" ]; then
+            CHANGED=$(git diff --name-only "$PREV_MAIN" HEAD)
+          else
+            CHANGED=""
+          fi
+
+          if echo "$CHANGED" | grep -q "^\.version$"; then
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+            echo "📝 .version was manually set — using it as-is"
+          else
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+
+            # Merge commits reachable from HEAD but not from its first parent
+            # (i.e., everything that came in via the develop branch since the
+            # last time develop was merged to main).
+            MERGE_COMMITS=$(git log "$PREV_MAIN"..HEAD --oneline --merges 2>/dev/null || true)
+
+            echo "── Merge commits in this release ──────────────────────────"
+            echo "${MERGE_COMMITS:-  (none found)}"
+
+            HAS_FEATURE=false
+            if echo "$MERGE_COMMITS" | grep -qiE "(feature/|feat/)"; then
+              HAS_FEATURE=true
+              echo "✅ Feature branch detected — will bump MINOR"
+            fi
+
+            ALL_COMMITS=$(git log "$PREV_MAIN"..HEAD --oneline 2>/dev/null || true)
+
+            if [ "$HAS_FEATURE" = true ]; then
+              echo "bump_type=minor"  >> $GITHUB_OUTPUT
+              echo "should_bump=true" >> $GITHUB_OUTPUT
+            elif [ -n "$ALL_COMMITS" ]; then
+              echo "bump_type=patch"  >> $GITHUB_OUTPUT
+              echo "should_bump=true" >> $GITHUB_OUTPUT
+              echo "🔧 Only fix/other branches — will bump PATCH"
+            else
+              echo "should_bump=false" >> $GITHUB_OUTPUT
+              echo "⏭️  No new commits — no bump"
+            fi
+          fi
+
+      - name: Bump version file
+        if: >
+          steps.version.outputs.version_changed == 'false' &&
+          steps.version.outputs.should_bump == 'true'
+        run: |
+          python scripts/bump_version.py --bump "${{ steps.version.outputs.bump_type }}"
+          echo "Bumped to: $(cat .version)"
+
+      - name: Validate version file
+        run: python scripts/bump_version.py --check
+
+      - name: Commit updated .version to main
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
+
+          if git diff --quiet; then
+            echo "No changes to commit"
+          else
+            VERSION=$(cat .version)
+            git add .version
+            git commit -m "chore: release ${VERSION} [skip ci]"
+            git push
+            echo "✅ .version updated to ${VERSION}"
+          fi
+
+      - name: Read final version
+        id: final
         run: |
           VER=$(cat .version | tr -d '[:space:]')
           echo "VERSION=$VER" >> $GITHUB_OUTPUT
 
-      - name: Check if Tag Exists
-        uses: mukunku/tag-exists-action@v1.4.0
+      - name: Check if tag already exists
         id: check_tag
+        uses: mukunku/tag-exists-action@v1.4.0
         with:
-          tag: 'v${{ steps.version.outputs.VERSION }}'
+          tag: 'v${{ steps.final.outputs.VERSION }}'
 
-      - name: Create Release
+      - name: Create GitHub Release
         if: steps.check_tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.version.outputs.VERSION }}
-          name: Release v${{ steps.version.outputs.VERSION }}
+          tag_name: v${{ steps.final.outputs.VERSION }}
+          name: Release v${{ steps.final.outputs.VERSION }}
           generate_release_notes: true
           draft: false
           prerelease: false
