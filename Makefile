@@ -233,18 +233,26 @@ cocotb-test: cocotb-analyze
 		exit 1; \
 	fi
 	@echo "$(YELLOW)>>> Running cocotb simulation...$(NC)"
-	@cd $(TB_DIR) && MODULE=$(COCOTB_TB) \
+	@cd $(TB_DIR) && COCOTB_TEST_MODULES=$(COCOTB_TB) \
 		PYTHONPATH=$(TB_DIR) \
+		PYGPI_PYTHON_BIN=$(PYTHON) \
 		$(GHDL) -r $(GHDL_STD) --workdir=$(COCOTB_BUILD_DIR) -P$(WORK_DIR) -P$(COCOTB_BUILD_DIR) \
 		axion_axi_lite_bridge_wrap \
 		--vpi=$(COCOTB_VPI) \
 		--stop-time=1ms 2>&1 | tee $(BUILD_DIR)/cocotb_output.log; \
-	EXIT_CODE=$$?; \
-	if [ $$EXIT_CODE -ne 0 ]; then \
+	GHDL_EXIT=$${PIPESTATUS[0]}; \
+	if [ $$GHDL_EXIT -ne 0 ]; then \
 		echo ""; \
-		echo "$(RED)✗ cocotb tests FAILED (exit code: $$EXIT_CODE)$(NC)"; \
+		echo "$(RED)✗ cocotb tests FAILED (exit code: $$GHDL_EXIT)$(NC)"; \
 		echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"; \
-		exit $$EXIT_CODE; \
+		exit $$GHDL_EXIT; \
+	fi; \
+	FAIL_COUNT=$$(grep -oP 'FAIL=\K[0-9]+' $(BUILD_DIR)/cocotb_output.log | tail -1); \
+	if [ -n "$$FAIL_COUNT" ] && [ "$$FAIL_COUNT" -gt 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ cocotb tests FAILED ($$FAIL_COUNT test(s) failed)$(NC)"; \
+		echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"; \
+		exit 1; \
 	fi
 	@echo ""
 	@echo "$(GREEN)✓ cocotb tests completed successfully$(NC)"
