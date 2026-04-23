@@ -63,15 +63,14 @@ NC := \033[0m
 VENV_PYTHON := $(shell cd $(ROOT_DIR) && git rev-parse --show-toplevel 2>/dev/null)/venv/bin/python3
 PYTHON := $(shell if [ -x "$(VENV_PYTHON)" ]; then echo "$(VENV_PYTHON)"; else echo "python3"; fi)
 
-# Venv that contains cocotb + Verilator bindings (used for SV package tests locally)
-AXION_HDL_VENV := /home/bugra/Desktop/git/axion-hdl/venv
+# Venv that contains cocotb + Verilator bindings for SV package tests.
+# Defaults to the repo-local ./venv; override AXION_HDL_VENV via make or environment
+# if your cocotb/Verilator venv lives elsewhere.
+AXION_HDL_VENV ?= $(ROOT_DIR)/venv
 
 # Python for SV package tests: use venv if available, otherwise system python3
 # In Docker the venv does not exist so this naturally falls back to system python3
 PYTHON_FOR_SV := $(shell if [ -x "$(AXION_HDL_VENV)/bin/python3" ]; then echo "$(AXION_HDL_VENV)/bin/python3"; else echo "python3"; fi)
-
-# cocotb build dir for SV package tests
-SV_PKG_SIM_DIR := $(BUILD_DIR)/sv_pkg_sim
 
 # Find cocotb VPI library at runtime from whichever python3 is active
 COCOTB_VPI = $(shell $(PYTHON) -c \
@@ -130,7 +129,14 @@ test: elaborate
 	@mkdir -p $(BUILD_DIR)
 	@mkdir -p $(REPORT_DIR)
 	@echo "$(YELLOW)>>> [1/2] VHDL tests (GHDL)...$(NC)"
-	@$(GHDL) -r $(GHDL_ELAB_FLAGS) axion_axi_lite_bridge_tb $(GHDL_RUN_FLAGS) --wave=$(WAVE_FILE) 2>&1 | tee $(TEST_OUTPUT)
+	@$(GHDL) -r $(GHDL_ELAB_FLAGS) axion_axi_lite_bridge_tb $(GHDL_RUN_FLAGS) --wave=$(WAVE_FILE) 2>&1 | tee $(TEST_OUTPUT); \
+	GHDL_EXIT=$${PIPESTATUS[0]}; \
+	if [ $$GHDL_EXIT -ne 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ VHDL tests FAILED$(NC)"; \
+		echo "$(BLUE)Log: $(TEST_OUTPUT)$(NC)"; \
+		exit 1; \
+	fi
 	@echo ""
 	@echo "$(GREEN)✓ Waveform generated: $(WAVE_FILE)$(NC)"
 	@$(MAKE) -s report
