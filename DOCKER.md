@@ -56,11 +56,11 @@ docker push ghcr.io/bugratufan/axion-common:latest
 ## Image Contents
 
 The Docker image includes:
-- **GHDL 4.1.0** - VHDL simulator
-- **Python 3.10** - For cocotb and scripting
-- **cocotb 1.8.1** - Python-based hardware testbench framework
+- **GHDL** (Ubuntu 24.04 apt) - VHDL simulator
+- **Verilator 5.032** (built from source) - SystemVerilog simulator
+- **Python 3** (Ubuntu 24.04 default) - For cocotb and scripting
+- **cocotb 2.x + cocotb-tools** (latest pip release) - Python-based hardware testbench framework
 - **Make** - Build automation
-- **GTKWave** - Waveform viewer (optional)
 
 ## Environment Variables
 

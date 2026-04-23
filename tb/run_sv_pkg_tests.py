@@ -14,7 +14,6 @@ Copyright (c) 2024 Bugra Tufan
 MIT License
 """
 
-import os
 import sys
 import shutil
 import pathlib
@@ -50,8 +49,6 @@ def main():
         print("If you use a custom interpreter/venv, run the script with that Python")
         print("or set the appropriate PYTHON/venv path override for your environment.")
         sys.exit(1)
-
-    BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
     # Clean stale build artifacts (Vtop.mk may contain hardcoded paths
     # from a different Python/cocotb installation)

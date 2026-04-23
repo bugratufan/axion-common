@@ -38,7 +38,7 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Get repository info
-REPO_OWNER=$(git -C "$SCRIPT_DIR" config --get remote.origin.url | grep -oP '(?<=/)[^/]+(?=/[^/]+\.git)' || echo "bugratufan")
+REPO_OWNER=$(git -C "$SCRIPT_DIR" config --get remote.origin.url | sed 's|.*github.com[:/]\([^/]*\)/.*|\1|' || echo "bugratufan")
 IMAGE_NAME="axion-common:latest"
 REGISTRY_IMAGE="ghcr.io/$REPO_OWNER/axion-common:latest"
 

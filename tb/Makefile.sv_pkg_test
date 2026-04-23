@@ -28,8 +28,8 @@ VERILOG_SOURCES = $(abspath ../src/axion_common_pkg.sv) \
 # --------------------------------------------------------------------------
 # cocotb test module
 # --------------------------------------------------------------------------
-TOPLEVEL = tb_axion_common_pkg_wrap
-MODULE   = tb_axion_common_pkg_cocotb
+TOPLEVEL             = tb_axion_common_pkg_wrap
+COCOTB_TEST_MODULES  = tb_axion_common_pkg_cocotb
 
 # --------------------------------------------------------------------------
 # Build output directory (inside the repo-level build/ folder)

@@ -66,7 +66,7 @@ ENV PATH="/usr/local/bin:${PATH}"
 # Verify tool versions
 RUN ghdl --version && echo "✓ GHDL installed" && \
     verilator --version && echo "✓ Verilator installed" && \
-    grep -c "evalNeeded" $(verilator --getenv VERILATOR_ROOT)/include/verilated_vpi.h
+    grep -q "evalNeeded" $(verilator --getenv VERILATOR_ROOT)/include/verilated_vpi.h && echo "✓ evalNeeded found"
 
 # Install Python packages globally
 # cocotb 2.0 pulls in cocotb-tools automatically; add it explicitly for clarity

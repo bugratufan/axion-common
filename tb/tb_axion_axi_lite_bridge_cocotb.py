@@ -10,7 +10,7 @@ DUT top: axion_axi_lite_bridge_wrap (G_NUM_SLAVES=3, G_TIMEOUT_WIDTH=8)
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, ClockCycles, Timer, with_timeout
+from cocotb.triggers import RisingEdge, ClockCycles, with_timeout
 import random
 
 # ---------------------------------------------------------------------------
