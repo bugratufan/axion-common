@@ -92,7 +92,13 @@ setup_image() {
 
     # Build locally
     print_step "Building Docker image locally..."
-    docker build --network=host -t "$IMAGE_NAME" "$SCRIPT_DIR"
+    # --network=host speeds up package downloads on Linux but is not supported on
+    # Docker Desktop (macOS/Windows).  Set DOCKER_BUILD_NETWORK=host to enable it.
+    DOCKER_NETWORK_ARG=""
+    if [ "${DOCKER_BUILD_NETWORK:-}" = "host" ]; then
+        DOCKER_NETWORK_ARG="--network=host"
+    fi
+    docker build $DOCKER_NETWORK_ARG -t "$IMAGE_NAME" "$SCRIPT_DIR"
     print_success "Docker image built: $IMAGE_NAME"
 }
 
