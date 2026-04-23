@@ -1,0 +1,154 @@
+################################################################################
+# Version Bump Workflow — Axion-Common
+#
+# Triggered on every PR that targets `main` (develop → main release PR).
+#
+# Logic:
+#   1. If .version was manually edited in the PR branch  →  use it as-is
+#      (developer took ownership of the version number).
+#   2. Otherwise, inspect all merge commits between the last main tip and
+#      HEAD of the PR branch (i.e., everything that landed in develop since
+#      the last release):
+#        • Any merge from a feature/* or feat/* branch  →  bump MINOR
+#        • Only fix/* / hotfix/* / other branches found →  bump PATCH
+#        • No new commits at all                        →  no bump
+#   3. Commit the updated .version back to the PR branch so the release
+#      workflow (cd.yml) picks it up when the PR is merged.
+#
+# The [skip ci] tag in the commit message prevents an infinite CI loop.
+################################################################################
+
+name: Version Bump
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  version-bump:
+    name: Auto-bump version for release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ------------------------------------------------------------------
+      # Step 1 — was .version manually changed?
+      # ------------------------------------------------------------------
+      - name: Check if .version was manually modified
+        id: version-check
+        run: |
+          git fetch origin main
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+
+          if echo "$CHANGED_FILES" | grep -q "^\.version$"; then
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+            echo "📝 .version was manually edited in this PR — skipping auto-bump"
+          else
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+            echo "🔄 .version not changed — will analyse merged branches for auto-bump"
+          fi
+
+      # ------------------------------------------------------------------
+      # Step 2 — analyse which branch types were merged into develop
+      # ------------------------------------------------------------------
+      - name: Analyse merged branch origins
+        id: analyze
+        if: steps.version-check.outputs.version_changed == 'false'
+        run: |
+          git fetch origin main develop
+
+          # All merge commits in develop that are not yet in main.
+          # The commit subject typically looks like:
+          #   "Merge pull request #N from user/feature/some-thing"
+          MERGE_COMMITS=$(git log origin/main..HEAD --oneline --merges 2>/dev/null || true)
+
+          # PR branch name itself (handles the common case where develop IS
+          # being merged directly without an intermediate merge commit).
+          CURRENT_BRANCH="${{ github.head_ref }}"
+
+          echo "── Merge commits since last main ──────────────────────────"
+          echo "${MERGE_COMMITS:-  (none found)}"
+          echo "── Current PR branch: $CURRENT_BRANCH ─────────────────────"
+
+          HAS_FEATURE=false
+
+          # Check merge commit subjects for feature/feat branch names
+          if echo "$MERGE_COMMITS" | grep -qiE "(feature/|feat/)"; then
+            HAS_FEATURE=true
+            echo "✅ Feature branch detected via merge commit messages"
+          fi
+
+          # Check the PR branch name itself
+          if [[ "$CURRENT_BRANCH" == feature/* ]] || [[ "$CURRENT_BRANCH" == feat/* ]]; then
+            HAS_FEATURE=true
+            echo "✅ PR branch itself is a feature branch"
+          fi
+
+          # Any commits at all between main and HEAD?
+          ALL_COMMITS=$(git log origin/main..HEAD --oneline 2>/dev/null || true)
+
+          if [ "$HAS_FEATURE" = true ]; then
+            echo "bump_type=minor"  >> $GITHUB_OUTPUT
+            echo "should_bump=true" >> $GITHUB_OUTPUT
+            echo "📦 Decision: bump MINOR (feature changes present)"
+          elif [ -n "$ALL_COMMITS" ]; then
+            echo "bump_type=patch"  >> $GITHUB_OUTPUT
+            echo "should_bump=true" >> $GITHUB_OUTPUT
+            echo "🔧 Decision: bump PATCH (fix / other changes only)"
+          else
+            echo "should_bump=false" >> $GITHUB_OUTPUT
+            echo "⏭️  Decision: no bump (no new commits)"
+          fi
+
+      # ------------------------------------------------------------------
+      # Step 3 — perform the bump
+      # ------------------------------------------------------------------
+      - name: Bump version
+        if: >
+          steps.version-check.outputs.version_changed == 'false' &&
+          steps.analyze.outputs.should_bump == 'true'
+        run: |
+          BUMP_TYPE="${{ steps.analyze.outputs.bump_type }}"
+          echo "🚀 Bumping $BUMP_TYPE version..."
+          python scripts/bump_version.py --bump "$BUMP_TYPE"
+          echo "New version: $(cat .version)"
+
+      # ------------------------------------------------------------------
+      # Step 4 — sanity-check whatever version ends up in .version
+      # ------------------------------------------------------------------
+      - name: Validate version file
+        run: python scripts/bump_version.py --check
+
+      # ------------------------------------------------------------------
+      # Step 5 — commit the (possibly updated) .version back to the PR
+      # ------------------------------------------------------------------
+      - name: Commit version change
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "No version changes to commit"
+          else
+            VERSION=$(cat .version)
+            git add .version
+            git commit -m "chore: prepare release ${VERSION} [skip ci]"
+            git push
+            echo "✅ Version bumped to ${VERSION} and pushed to PR branch"
+          fi
