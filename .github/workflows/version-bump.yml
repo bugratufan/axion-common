@@ -1,24 +1,22 @@
 ################################################################################
-# Version Bump Workflow — Axion-Common
+# Version Preview Workflow — Axion-Common
 #
 # Triggered on every PR that targets `main` (develop → main release PR).
 #
-# Logic:
-#   1. If .version was manually edited in the PR branch  →  use it as-is
-#      (developer took ownership of the version number).
-#   2. Otherwise, inspect all merge commits between the last main tip and
-#      HEAD of the PR branch (i.e., everything that landed in develop since
-#      the last release):
-#        • Any merge from a feature/* or feat/* branch  →  bump MINOR
-#        • Only fix/* / hotfix/* / other branches found →  bump PATCH
-#        • No new commits at all                        →  no bump
-#   3. Commit the updated .version back to the PR branch so the release
-#      workflow (cd.yml) picks it up when the PR is merged.
+# Analyses which branches have been merged to develop since the last main
+# release and previews the version that will be created on merge.
+# No files are committed — the actual bump + commit + release happens in
+# cd.yml after the PR merges to main.
 #
-# The [skip ci] tag in the commit message prevents an infinite CI loop.
+# Logic:
+#   1. If .version was manually edited in the PR branch  →  use it as-is.
+#   2. Otherwise inspect merge commits between the last main tip and HEAD:
+#        • Any feature/* or feat/* branch found  →  MINOR bump
+#        • Only fix/* / other branches           →  PATCH bump
+#        • No new commits                        →  no bump
 ################################################################################
 
-name: Version Bump
+name: Version Preview
 
 on:
   pull_request:
@@ -26,15 +24,13 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
 
 jobs:
-  version-bump:
-    name: Auto-bump version for release
+  version-preview:
+    name: Preview release version
     runs-on: ubuntu-latest
-    # Don't re-run when the bot itself pushes the bumped .version back to the PR branch
-    if: github.actor != 'github-actions[bot]'
 
     steps:
       - name: Checkout PR branch
@@ -42,7 +38,6 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -50,7 +45,7 @@ jobs:
           python-version: "3.11"
 
       # ------------------------------------------------------------------
-      # Step 1 — was .version manually changed?
+      # Step 1 — was .version manually changed in this PR?
       # ------------------------------------------------------------------
       - name: Check if .version was manually modified
         id: version-check
@@ -60,10 +55,10 @@ jobs:
 
           if echo "$CHANGED_FILES" | grep -q "^\.version$"; then
             echo "version_changed=true" >> $GITHUB_OUTPUT
-            echo "📝 .version was manually edited in this PR — skipping auto-bump"
+            echo "📝 .version was manually edited in this PR — will be used as-is"
           else
             echo "version_changed=false" >> $GITHUB_OUTPUT
-            echo "🔄 .version not changed — will analyse merged branches for auto-bump"
+            echo "🔄 .version not changed — will analyse merged branches"
           fi
 
       # ------------------------------------------------------------------
@@ -75,13 +70,9 @@ jobs:
         run: |
           git fetch origin main develop
 
-          # All merge commits in develop that are not yet in main.
-          # The commit subject typically looks like:
-          #   "Merge pull request #N from user/feature/some-thing"
+          # All merge commits that are in develop (HEAD) but not yet in main.
+          # These represent every branch merged since the last release.
           MERGE_COMMITS=$(git log origin/main..HEAD --oneline --merges 2>/dev/null || true)
-
-          # PR branch name itself (handles the common case where develop IS
-          # being merged directly without an intermediate merge commit).
           CURRENT_BRANCH="${{ github.head_ref }}"
 
           echo "── Merge commits since last main ──────────────────────────"
@@ -90,25 +81,22 @@ jobs:
 
           HAS_FEATURE=false
 
-          # Check merge commit subjects for feature/feat branch names
           if echo "$MERGE_COMMITS" | grep -qiE "(feature/|feat/)"; then
             HAS_FEATURE=true
             echo "✅ Feature branch detected via merge commit messages"
           fi
 
-          # Check the PR branch name itself
           if [[ "$CURRENT_BRANCH" == feature/* ]] || [[ "$CURRENT_BRANCH" == feat/* ]]; then
             HAS_FEATURE=true
             echo "✅ PR branch itself is a feature branch"
           fi
 
-          # Any commits at all between main and HEAD?
           ALL_COMMITS=$(git log origin/main..HEAD --oneline 2>/dev/null || true)
 
           if [ "$HAS_FEATURE" = true ]; then
             echo "bump_type=minor"  >> $GITHUB_OUTPUT
             echo "should_bump=true" >> $GITHUB_OUTPUT
-            echo "📦 Decision: bump MINOR (feature changes present)"
+            echo "📦 Decision: bump MINOR (feature branch detected)"
           elif [ -n "$ALL_COMMITS" ]; then
             echo "bump_type=patch"  >> $GITHUB_OUTPUT
             echo "should_bump=true" >> $GITHUB_OUTPUT
@@ -119,38 +107,31 @@ jobs:
           fi
 
       # ------------------------------------------------------------------
-      # Step 3 — perform the bump
+      # Step 3 — compute and display the proposed version (no file write)
       # ------------------------------------------------------------------
-      - name: Bump version
-        if: >
-          steps.version-check.outputs.version_changed == 'false' &&
-          steps.analyze.outputs.should_bump == 'true'
+      - name: Show proposed release version
         run: |
+          CURRENT=$(cat .version)
+          VERSION_CHANGED="${{ steps.version-check.outputs.version_changed }}"
+          SHOULD_BUMP="${{ steps.analyze.outputs.should_bump }}"
           BUMP_TYPE="${{ steps.analyze.outputs.bump_type }}"
-          echo "🚀 Bumping $BUMP_TYPE version..."
-          python scripts/bump_version.py --bump "$BUMP_TYPE"
-          echo "New version: $(cat .version)"
 
-      # ------------------------------------------------------------------
-      # Step 4 — sanity-check whatever version ends up in .version
-      # ------------------------------------------------------------------
-      - name: Validate version file
-        run: python scripts/bump_version.py --check
+          echo "## 🏷️ Release version preview" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-      # ------------------------------------------------------------------
-      # Step 5 — commit the (possibly updated) .version back to the PR
-      # ------------------------------------------------------------------
-      - name: Commit version change
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-
-          if git diff --quiet && git diff --staged --quiet; then
-            echo "No version changes to commit"
+          if [ "$VERSION_CHANGED" = "true" ]; then
+            echo "**.version was manually set → will release \`$CURRENT\`**" >> $GITHUB_STEP_SUMMARY
+          elif [ "$SHOULD_BUMP" = "true" ]; then
+            python scripts/bump_version.py --bump "$BUMP_TYPE"
+            NEW_VERSION=$(cat .version)
+            echo "| | Version |"         >> $GITHUB_STEP_SUMMARY
+            echo "|---|---|"             >> $GITHUB_STEP_SUMMARY
+            echo "| Current  | \`$CURRENT\` |"              >> $GITHUB_STEP_SUMMARY
+            echo "| On merge | \`$NEW_VERSION\` ($BUMP_TYPE bump) |" >> $GITHUB_STEP_SUMMARY
+            echo ""
+            echo "🚀 Merging this PR will release v$NEW_VERSION"
           else
-            VERSION=$(cat .version)
-            git add .version
-            git commit -m "chore: prepare release ${VERSION} [skip ci]"
-            git push
-            echo "✅ Version bumped to ${VERSION} and pushed to PR branch"
+            echo "No version bump needed — no new commits since last release." >> $GITHUB_STEP_SUMMARY
           fi
+          # NOTE: .version may have been modified locally above for preview
+          # purposes but this job never commits or pushes anything.
