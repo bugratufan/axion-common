@@ -33,6 +33,8 @@ jobs:
   version-bump:
     name: Auto-bump version for release
     runs-on: ubuntu-latest
+    # Don't re-run when the bot itself pushes the bumped .version back to the PR branch
+    if: github.actor != 'github-actions[bot]'
 
     steps:
       - name: Checkout PR branch
