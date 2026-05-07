@@ -54,9 +54,6 @@ architecture rtl of axi_test_axion_reg is
     signal wr_addr_valid_n : std_logic;  -- Combinational write address invalid flag
     signal rd_addr_valid_n : std_logic;  -- Combinational read address invalid flag
     
-    -- Write trigger signal
-    signal do_reg_write : std_logic;
-    
     -- Register storage
     signal version_reg : std_logic_vector(31 downto 0) := (others => '0');
     signal val_reg : std_logic_vector(31 downto 0) := (others => '0');
@@ -136,11 +133,9 @@ begin
                 axi_rresp <= "00";
                 wr_access_error <= '0';
                 rd_access_error <= '0';
-                do_reg_write <= '0';
+                version_reg <= x"ABCDEF01";
+                val_reg     <= x"DEADBEEF";
             else
-                -- Default: clear one-shot signals
-                do_reg_write <= '0';
-                
                 case axi_state is
                     ------------------------------------
                     -- IDLE: Wait for transaction start
@@ -209,7 +204,6 @@ begin
                     when WR_DO_WRITE =>
                         axi_awready <= '0';
                         axi_wready <= '0';
-                        do_reg_write <= '1';  -- Trigger register write
                         axi_state <= WR_RESP;
                         axi_bvalid <= '1';
                         -- AXI-LITE-014: Response Code Compliance
@@ -217,6 +211,22 @@ begin
                             axi_bresp <= "10"; -- SLVERR
                         else
                             axi_bresp <= "00"; -- OKAY
+                        end if;
+                        -- Write registers directly so val_reg commits in the
+                        -- same clock edge as bvalid is asserted (no one-shot delay)
+                        if wr_access_error = '0' then
+                            if unsigned(wr_addr_reg) = unsigned(BASE_ADDR) + 0 then
+                                if wr_strb_reg(0) = '1' then version_reg(7  downto  0) <= wr_data_reg(7  downto  0); end if;
+                                if wr_strb_reg(1) = '1' then version_reg(15 downto  8) <= wr_data_reg(15 downto  8); end if;
+                                if wr_strb_reg(2) = '1' then version_reg(23 downto 16) <= wr_data_reg(23 downto 16); end if;
+                                if wr_strb_reg(3) = '1' then version_reg(31 downto 24) <= wr_data_reg(31 downto 24); end if;
+                            end if;
+                            if unsigned(wr_addr_reg) = unsigned(BASE_ADDR) + 4 then
+                                if wr_strb_reg(0) = '1' then val_reg(7  downto  0) <= wr_data_reg(7  downto  0); end if;
+                                if wr_strb_reg(1) = '1' then val_reg(15 downto  8) <= wr_data_reg(15 downto  8); end if;
+                                if wr_strb_reg(2) = '1' then val_reg(23 downto 16) <= wr_data_reg(23 downto 16); end if;
+                                if wr_strb_reg(3) = '1' then val_reg(31 downto 24) <= wr_data_reg(31 downto 24); end if;
+                            end if;
                         end if;
                     
                     ------------------------------------
@@ -282,51 +292,6 @@ begin
         end if;
         if unsigned(axi_araddr) = unsigned(BASE_ADDR) + 4 then
             rd_addr_valid_n <= '0';  -- Valid read address
-        end if;
-    end process;
-    
-    -- Register Write Logic
-    -- Write occurs when do_reg_write is asserted (WR_DO_WRITE state)
-    process(axi_aclk)
-    begin
-        if rising_edge(axi_aclk) then
-            if axi_aresetn = '0' then
-                version_reg <= x"ABCDEF01";
-                val_reg <= x"DEADBEEF";
-            else
-                if do_reg_write = '1' and wr_access_error = '0' then
-                    if unsigned(wr_addr_reg) = unsigned(BASE_ADDR) + 0 then
-                        -- Byte-level write strobe
-                        if wr_strb_reg(0) = '1' then
-                            version_reg(7 downto 0) <= wr_data_reg(7 downto 0);
-                        end if;
-                        if wr_strb_reg(1) = '1' then
-                            version_reg(15 downto 8) <= wr_data_reg(15 downto 8);
-                        end if;
-                        if wr_strb_reg(2) = '1' then
-                            version_reg(23 downto 16) <= wr_data_reg(23 downto 16);
-                        end if;
-                        if wr_strb_reg(3) = '1' then
-                            version_reg(31 downto 24) <= wr_data_reg(31 downto 24);
-                        end if;
-                    end if;
-                    if unsigned(wr_addr_reg) = unsigned(BASE_ADDR) + 4 then
-                        -- Byte-level write strobe
-                        if wr_strb_reg(0) = '1' then
-                            val_reg(7 downto 0) <= wr_data_reg(7 downto 0);
-                        end if;
-                        if wr_strb_reg(1) = '1' then
-                            val_reg(15 downto 8) <= wr_data_reg(15 downto 8);
-                        end if;
-                        if wr_strb_reg(2) = '1' then
-                            val_reg(23 downto 16) <= wr_data_reg(23 downto 16);
-                        end if;
-                        if wr_strb_reg(3) = '1' then
-                            val_reg(31 downto 24) <= wr_data_reg(31 downto 24);
-                        end if;
-                    end if;
-                end if;
-            end if;
         end if;
     end process;
     
