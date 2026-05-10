@@ -35,14 +35,15 @@ GHDL_ELAB_FLAGS := $(GHDL_STD) --workdir=$(WORK_DIR) -P$(WORK_DIR)
 GHDL_RUN_FLAGS := --stop-time=100ms
 
 # Source files
-PKG_SRC    := $(SRC_DIR)/axion_common_pkg.vhd
-BRIDGE_SRC := $(SRC_DIR)/axion_axi_lite_bridge.vhd
-FILTER_SRC := $(SRC_DIR)/axion_axi_lite_filter.vhd
-ROUTER_SRC := $(SRC_DIR)/axion_axi_lite_router.vhd
-BRIDGE_TB  := $(TB_DIR)/axion_axi_lite_bridge_tb.vhd
+PKG_SRC      := $(SRC_DIR)/axion_common_pkg.vhd
+BRIDGE_SRC   := $(SRC_DIR)/axion_axi_lite_bridge.vhd
+FILTER_SRC   := $(SRC_DIR)/axion_axi_lite_filter.vhd
+ROUTER_SRC   := $(SRC_DIR)/axion_axi_lite_router.vhd
+WATCHDOG_SRC := $(SRC_DIR)/axion_axi_lite_watchdog.vhd
+BRIDGE_TB    := $(TB_DIR)/axion_axi_lite_bridge_tb.vhd
 
 # All source files
-SRCS := $(PKG_SRC) $(BRIDGE_SRC) $(FILTER_SRC) $(ROUTER_SRC)
+SRCS := $(PKG_SRC) $(BRIDGE_SRC) $(FILTER_SRC) $(ROUTER_SRC) $(WATCHDOG_SRC)
 TBS  := $(BRIDGE_TB)
 
 # Output files
@@ -140,6 +141,8 @@ analyze: dirs check-ghdl
 	@echo "  ✓ axion_axi_lite_filter.vhd"
 	@$(GHDL) -a $(GHDL_FLAGS) --work=axion_common $(ROUTER_SRC)
 	@echo "  ✓ axion_axi_lite_router.vhd"
+	@$(GHDL) -a $(GHDL_FLAGS) --work=axion_common $(WATCHDOG_SRC)
+	@echo "  ✓ axion_axi_lite_watchdog.vhd"
 	@$(GHDL) -a $(GHDL_FLAGS) --work=axion_common $(FILTER_REG_SRC)
 	@echo "  ✓ axi_test_axion_reg.vhd"
 	@$(GHDL) -a $(GHDL_FLAGS) $(BRIDGE_TB)

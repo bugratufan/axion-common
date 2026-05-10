@@ -34,7 +34,7 @@ entity axion_axi_lite_bridge is
         G_NUM_SLAVES     : positive := 2;
         
         -- Timeout counter width (timeout = 2^G_TIMEOUT_WIDTH cycles)
-        G_TIMEOUT_WIDTH  : positive := 16
+        G_TIMEOUT_WIDTH  : positive := 4
     );
     port (
         -- Clock and Reset
@@ -250,7 +250,9 @@ begin
                         if timeout_flag = '1' then
                             m_axi_out.bresp  <= C_AXI_RESP_SLVERR;
                             m_axi_out.bvalid <= '1';
-                            state <= ST_IDLE;
+                            timeout_flag     <= '0';
+                            timeout_cnt      <= (others => '0');
+                            state <= ST_WRITE_COMPLETE;
                         end if;
 
                     -----------------------------------------------------------
@@ -288,7 +290,9 @@ begin
                         if timeout_flag = '1' then
                             m_axi_out.bresp  <= C_AXI_RESP_SLVERR;
                             m_axi_out.bvalid <= '1';
-                            state <= ST_IDLE;
+                            timeout_flag     <= '0';
+                            timeout_cnt      <= (others => '0');
+                            state <= ST_WRITE_COMPLETE;
                         end if;
 
                     -----------------------------------------------------------
@@ -378,10 +382,10 @@ begin
                         v_all_resp_received := '1';
                         for i in 0 to G_NUM_SLAVES-1 loop
                             if S_AXI_ARR_S2M(i).bvalid = '1' and resp_received(i) = '0' then
-                                -- Handshake in progress (bready was already 1), clean up
                                 resp_received(i)    <= '1';
                                 s_axi_out(i).bready <= '0';
                             elsif resp_received(i) = '0' then
+                                s_axi_out(i).bready <= '1';  -- drive bready to consume any pending response
                                 v_all_resp_received := '0';  -- still waiting for this slave
                             end if;
                         end loop;
@@ -422,7 +426,9 @@ begin
                             m_axi_out.rresp  <= C_AXI_RESP_SLVERR;
                             m_axi_out.rdata  <= (others => '0');
                             m_axi_out.rvalid <= '1';
-                            state <= ST_IDLE;
+                            timeout_flag     <= '0';
+                            timeout_cnt      <= (others => '0');
+                            state <= ST_READ_COMPLETE;
                         end if;
 
                     -----------------------------------------------------------
@@ -515,10 +521,10 @@ begin
                         v_all_resp_received := '1';
                         for i in 0 to G_NUM_SLAVES-1 loop
                             if S_AXI_ARR_S2M(i).rvalid = '1' and resp_received(i) = '0' then
-                                -- Handshake in progress (rready was already 1), clean up
                                 resp_received(i)    <= '1';
                                 s_axi_out(i).rready <= '0';
                             elsif resp_received(i) = '0' then
+                                s_axi_out(i).rready <= '1';  -- drive rready to consume any pending response
                                 v_all_resp_received := '0';  -- still waiting for this slave
                             end if;
                         end loop;
