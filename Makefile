@@ -35,13 +35,16 @@ GHDL_ELAB_FLAGS := $(GHDL_STD) --workdir=$(WORK_DIR) -P$(WORK_DIR)
 GHDL_RUN_FLAGS := --stop-time=100ms
 
 # Source files
-PKG_SRC := $(SRC_DIR)/axion_common_pkg.vhd
-BRIDGE_SRC := $(SRC_DIR)/axion_axi_lite_bridge.vhd
-BRIDGE_TB := $(TB_DIR)/axion_axi_lite_bridge_tb.vhd
+PKG_SRC      := $(SRC_DIR)/axion_common_pkg.vhd
+BRIDGE_SRC   := $(SRC_DIR)/axion_axi_lite_bridge.vhd
+FILTER_SRC   := $(SRC_DIR)/axion_axi_lite_filter.vhd
+ROUTER_SRC   := $(SRC_DIR)/axion_axi_lite_router.vhd
+WATCHDOG_SRC := $(SRC_DIR)/axion_axi_lite_watchdog.vhd
+BRIDGE_TB    := $(TB_DIR)/axion_axi_lite_bridge_tb.vhd
 
 # All source files
-SRCS := $(PKG_SRC) $(BRIDGE_SRC)
-TBS := $(BRIDGE_TB)
+SRCS := $(PKG_SRC) $(BRIDGE_SRC) $(FILTER_SRC) $(ROUTER_SRC) $(WATCHDOG_SRC)
+TBS  := $(BRIDGE_TB)
 
 # Output files
 TEST_OUTPUT := $(BUILD_DIR)/test_output.log
@@ -78,13 +81,28 @@ COCOTB_VPI = $(shell $(PYTHON) -c \
 	2>/dev/null)
 
 # cocotb build dirs
-COCOTB_BUILD_DIR := $(BUILD_DIR)/cocotb_sim
-WRAP_SRC := $(TB_DIR)/axion_axi_lite_bridge_wrap.vhd
-COCOTB_TB := tb_axion_axi_lite_bridge_cocotb
+COCOTB_BUILD_DIR       := $(BUILD_DIR)/cocotb_sim
+WRAP_SRC               := $(TB_DIR)/axion_axi_lite_bridge_wrap.vhd
+COCOTB_TB              := tb_axion_axi_lite_bridge_cocotb
 
 # GHDL generic overrides for the cocotb wrapper.
 # G_TIMEOUT_WIDTH=8 → 256-cycle bridge timeout, matching the cocotb test assumptions.
 COCOTB_GHDL_GENERICS := -gG_TIMEOUT_WIDTH=8
+
+# Filter cocotb settings
+FILTER_BUILD_DIR       := $(BUILD_DIR)/filter_cocotb_sim
+FILTER_WRAP_SRC        := $(TB_DIR)/axion_axi_lite_filter_wrap.vhd
+FILTER_REG_SRC         := $(TB_DIR)/axi_test_axion_reg.vhd
+FILTER_COCOTB_TB       := tb_axion_axi_lite_filter_cocotb
+# Filter window 0x4000..0x4FFF (16384..20479)
+FILTER_GHDL_GENERICS   := -gG_ADDR_BEGIN_INT=16384 -gG_ADDR_END_INT=20479
+
+# Router cocotb settings
+ROUTER_BUILD_DIR       := $(BUILD_DIR)/router_cocotb_sim
+ROUTER_WRAP_SRC        := $(TB_DIR)/axion_axi_lite_router_wrap.vhd
+ROUTER_COCOTB_TB       := tb_axion_axi_lite_router_cocotb
+# Router window: base=0x4000 (16384), range=0xFFF (4095)  → upstream 0x4000..0x4FFF
+ROUTER_GHDL_GENERICS   := -gG_BASE_ADDR_INT=16384 -gG_ADDR_RANGE_INT=4095
 
 # Docker image tag used by CI (ci.yml).  Must match the tags: field in the workflow.
 CI_IMAGE := axion-common:ci
@@ -93,7 +111,10 @@ CI_IMAGE := axion-common:ci
 # Targets
 ################################################################################
 
-.PHONY: all analyze test cocotb-test cocotb-analyze cocotb-sv-pkg-test docker-test local-ci-test clean help dirs check-ghdl report
+.PHONY: all analyze test cocotb-test cocotb-analyze cocotb-sv-pkg-test \
+        filter-cocotb-test filter-cocotb-analyze \
+        router-cocotb-test router-cocotb-analyze \
+        docker-test local-ci-test clean help dirs check-ghdl report
 
 # Default target
 all: analyze
@@ -116,6 +137,14 @@ analyze: dirs check-ghdl
 	@echo "  ✓ axion_common_pkg.vhd"
 	@$(GHDL) -a $(GHDL_FLAGS) --work=axion_common $(BRIDGE_SRC)
 	@echo "  ✓ axion_axi_lite_bridge.vhd"
+	@$(GHDL) -a $(GHDL_FLAGS) --work=axion_common $(FILTER_SRC)
+	@echo "  ✓ axion_axi_lite_filter.vhd"
+	@$(GHDL) -a $(GHDL_FLAGS) --work=axion_common $(ROUTER_SRC)
+	@echo "  ✓ axion_axi_lite_router.vhd"
+	@$(GHDL) -a $(GHDL_FLAGS) --work=axion_common $(WATCHDOG_SRC)
+	@echo "  ✓ axion_axi_lite_watchdog.vhd"
+	@$(GHDL) -a $(GHDL_FLAGS) --work=axion_common $(FILTER_REG_SRC)
+	@echo "  ✓ axi_test_axion_reg.vhd"
 	@$(GHDL) -a $(GHDL_FLAGS) $(BRIDGE_TB)
 	@echo "  ✓ axion_axi_lite_bridge_tb.vhd"
 	@echo "$(GREEN)✓ All sources analyzed successfully$(NC)"
@@ -266,6 +295,108 @@ cocotb-test: cocotb-analyze
 	@echo "$(GREEN)✓ cocotb tests completed successfully$(NC)"
 	@echo "$(BLUE)Log: $(BUILD_DIR)/cocotb_output.log$(NC)"
 
+# Analyze filter wrapper (depends on axion_common lib with filter + reg)
+filter-cocotb-analyze: analyze
+	@echo "$(YELLOW)>>> Analyzing filter cocotb wrapper...$(NC)"
+	@mkdir -p $(FILTER_BUILD_DIR)
+	$(GHDL) -a $(GHDL_STD) --workdir=$(FILTER_BUILD_DIR) -P$(WORK_DIR) $(FILTER_WRAP_SRC) || \
+		(echo "$(RED)✗ Failed to analyze filter wrapper$(NC)" && exit 1)
+	@echo "  ✓ axion_axi_lite_filter_wrap.vhd"
+	$(GHDL) -e $(GHDL_STD) --workdir=$(FILTER_BUILD_DIR) -P$(WORK_DIR) -P$(FILTER_BUILD_DIR) \
+		$(FILTER_GHDL_GENERICS) axion_axi_lite_filter_wrap || \
+		(echo "$(RED)✗ Failed to elaborate filter wrapper$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Filter wrapper elaborated successfully$(NC)"
+
+# Run filter cocotb tests
+filter-cocotb-test: filter-cocotb-analyze
+	@echo ""
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo "$(BLUE)  Axion Common - Running Filter cocotb Tests$(NC)"
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo ""
+	@if [ ! -f "$(COCOTB_VPI)" ]; then \
+		echo "$(RED)Error: cocotb VPI library not found at $(COCOTB_VPI)$(NC)"; \
+		echo "  Make sure the venv is activated and cocotb is installed."; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)>>> Running filter cocotb simulation...$(NC)"
+	@cd $(TB_DIR) && COCOTB_TEST_MODULES=$(FILTER_COCOTB_TB) \
+		PYTHONPATH=$(TB_DIR) \
+		PYGPI_PYTHON_BIN=$(PYTHON) \
+		$(GHDL) -r $(GHDL_STD) --workdir=$(FILTER_BUILD_DIR) -P$(WORK_DIR) -P$(FILTER_BUILD_DIR) \
+		$(FILTER_GHDL_GENERICS) \
+		axion_axi_lite_filter_wrap \
+		--vpi=$(COCOTB_VPI) \
+		--stop-time=2ms 2>&1 | tee $(BUILD_DIR)/filter_cocotb_output.log; \
+	GHDL_EXIT=$${PIPESTATUS[0]}; \
+	if [ $$GHDL_EXIT -ne 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ Filter cocotb tests FAILED (exit code: $$GHDL_EXIT)$(NC)"; \
+		echo "$(BLUE)Log: $(BUILD_DIR)/filter_cocotb_output.log$(NC)"; \
+		exit $$GHDL_EXIT; \
+	fi; \
+	FAIL_COUNT=$$(grep -oP 'FAIL=\K[0-9]+' $(BUILD_DIR)/filter_cocotb_output.log | tail -1); \
+	if [ -n "$$FAIL_COUNT" ] && [ "$$FAIL_COUNT" -gt 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ Filter cocotb tests FAILED ($$FAIL_COUNT test(s) failed)$(NC)"; \
+		echo "$(BLUE)Log: $(BUILD_DIR)/filter_cocotb_output.log$(NC)"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "$(GREEN)✓ Filter cocotb tests completed successfully$(NC)"
+	@echo "$(BLUE)Log: $(BUILD_DIR)/filter_cocotb_output.log$(NC)"
+
+# Analyze router wrapper (depends on axion_common lib with router + reg)
+router-cocotb-analyze: analyze
+	@echo "$(YELLOW)>>> Analyzing router cocotb wrapper...$(NC)"
+	@mkdir -p $(ROUTER_BUILD_DIR)
+	$(GHDL) -a $(GHDL_STD) --workdir=$(ROUTER_BUILD_DIR) -P$(WORK_DIR) $(ROUTER_WRAP_SRC) || \
+		(echo "$(RED)✗ Failed to analyze router wrapper$(NC)" && exit 1)
+	@echo "  ✓ axion_axi_lite_router_wrap.vhd"
+	$(GHDL) -e $(GHDL_STD) --workdir=$(ROUTER_BUILD_DIR) -P$(WORK_DIR) -P$(ROUTER_BUILD_DIR) \
+		$(ROUTER_GHDL_GENERICS) axion_axi_lite_router_wrap || \
+		(echo "$(RED)✗ Failed to elaborate router wrapper$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Router wrapper elaborated successfully$(NC)"
+
+# Run router cocotb tests
+router-cocotb-test: router-cocotb-analyze
+	@echo ""
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo "$(BLUE)  Axion Common - Running Router cocotb Tests$(NC)"
+	@echo "$(BLUE)================================================================================$(NC)"
+	@echo ""
+	@if [ ! -f "$(COCOTB_VPI)" ]; then \
+		echo "$(RED)Error: cocotb VPI library not found at $(COCOTB_VPI)$(NC)"; \
+		echo "  Make sure the venv is activated and cocotb is installed."; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)>>> Running router cocotb simulation...$(NC)"
+	@cd $(TB_DIR) && COCOTB_TEST_MODULES=$(ROUTER_COCOTB_TB) \
+		PYTHONPATH=$(TB_DIR) \
+		PYGPI_PYTHON_BIN=$(PYTHON) \
+		$(GHDL) -r $(GHDL_STD) --workdir=$(ROUTER_BUILD_DIR) -P$(WORK_DIR) -P$(ROUTER_BUILD_DIR) \
+		$(ROUTER_GHDL_GENERICS) \
+		axion_axi_lite_router_wrap \
+		--vpi=$(COCOTB_VPI) \
+		--stop-time=2ms 2>&1 | tee $(BUILD_DIR)/router_cocotb_output.log; \
+	GHDL_EXIT=$${PIPESTATUS[0]}; \
+	if [ $$GHDL_EXIT -ne 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ Router cocotb tests FAILED (exit code: $$GHDL_EXIT)$(NC)"; \
+		echo "$(BLUE)Log: $(BUILD_DIR)/router_cocotb_output.log$(NC)"; \
+		exit $$GHDL_EXIT; \
+	fi; \
+	FAIL_COUNT=$$(grep -oP 'FAIL=\K[0-9]+' $(BUILD_DIR)/router_cocotb_output.log | tail -1); \
+	if [ -n "$$FAIL_COUNT" ] && [ "$$FAIL_COUNT" -gt 0 ]; then \
+		echo ""; \
+		echo "$(RED)✗ Router cocotb tests FAILED ($$FAIL_COUNT test(s) failed)$(NC)"; \
+		echo "$(BLUE)Log: $(BUILD_DIR)/router_cocotb_output.log$(NC)"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "$(GREEN)✓ Router cocotb tests completed successfully$(NC)"
+	@echo "$(BLUE)Log: $(BUILD_DIR)/router_cocotb_output.log$(NC)"
+
 # Reproduce the exact CI environment locally.
 # Builds the image with the CI tag first, then runs both test jobs as CI does.
 # Run this before pushing to catch failures without waiting for GitHub Actions.
@@ -372,8 +503,10 @@ help:
 	@echo "  $(YELLOW)make elaborate$(NC)  - Elaborate testbench"
 	@echo "  $(YELLOW)make test$(NC)               - Run ALL tests: VHDL + SV package (default CI target)"
 	@echo "  $(YELLOW)make docker-test$(NC)        - Run all tests inside Docker container"
-	@echo "  $(YELLOW)make cocotb-test$(NC)        - Run VHDL cocotb tests only (GHDL)"
-	@echo "  $(YELLOW)make cocotb-sv-pkg-test$(NC) - Run SV package cocotb tests only (Verilator)"
+	@echo "  $(YELLOW)make cocotb-test$(NC)          - Run bridge cocotb tests (GHDL)"
+	@echo "  $(YELLOW)make filter-cocotb-test$(NC)  - Run filter cocotb tests (GHDL, 47 tests)"
+	@echo "  $(YELLOW)make router-cocotb-test$(NC)  - Run router cocotb tests (GHDL, 58 tests)"
+	@echo "  $(YELLOW)make cocotb-sv-pkg-test$(NC)  - Run SV package cocotb tests (Verilator)"
 	@echo "  $(YELLOW)make wave$(NC)               - Open waveform in GTKWave"
 	@echo "  $(YELLOW)make test-wave$(NC)      - Run tests and generate waveform (.ghw)"
 	@echo "  $(YELLOW)make view-wave$(NC)      - Run tests and open waveform in GTKWave"

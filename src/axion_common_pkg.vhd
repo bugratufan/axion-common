@@ -83,6 +83,10 @@ package axion_common_pkg is
     type t_axi_lite_m2s_array is array (natural range <>) of t_axi_lite_m2s;
     type t_axi_lite_s2m_array is array (natural range <>) of t_axi_lite_s2m;
 
+    -- Unconstrained array of AXI address-width words; used for per-slave
+    -- base address and range generics in axion_lite_smart_bridge.
+    type t_addr_array is array (natural range <>) of std_logic_vector(C_AXI_ADDR_WIDTH-1 downto 0);
+
     ---------------------------------------------------------------------------
     -- Initial/Default values
     ---------------------------------------------------------------------------
